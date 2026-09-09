@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# Native builds
+android/
+ios/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Env & secrets
+.env
+.env.local
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*

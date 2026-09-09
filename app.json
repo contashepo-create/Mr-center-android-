@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Mr Center",
+    "slug": "mr-center",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "mrcenter",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "backgroundColor": "#0A0E1A",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0E1A",
+      "imageWidth": 180
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mrcenter.app"
+    },
+    "android": {
+      "package": "com.mrcenter.app",
+      "versionCode": 1,
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0A0E1A"
+      },
+      "permissions": ["INTERNET", "ACCESS_NETWORK_STATE", "REQUEST_INSTALL_PACKAGES"]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "extra": {
+      "configUrl": "https://mr-center-config.YOUR-SUBDOMAIN.workers.dev/config",
+      "supabaseUrl": "",
+      "supabaseAnonKey": ""
+    }
+  }
+}
