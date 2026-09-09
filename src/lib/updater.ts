@@ -21,17 +21,7 @@ export interface UpdateInfo {
   changelog: string;
 }
 
-/** مقارنة أرقام الإصدارات النصية "1.0.10" مقابل "1.0.2" */
-export function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map((x) => parseInt(x, 10) || 0);
-  const pb = b.split('.').map((x) => parseInt(x, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const da = pa[i] ?? 0;
-    const db = pb[i] ?? 0;
-    if (da !== db) return da - db;
-  }
-  return 0;
-}
+import { compareVersions } from './utils';
 
 function currentVersionCode(): number {
   const raw = Application.nativeBuildVersion ?? '0';

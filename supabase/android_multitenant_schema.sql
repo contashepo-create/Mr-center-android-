@@ -137,12 +137,23 @@ RETURNS TEXT LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT student_id FROM public.profiles WHERE id = auth.uid();
 $$;
 
--- «حساب الموقع القديم»: مستخدم مصادق بلا ملف شخصي = مالك النسخة الأولى من الموقع
--- يحتفظ بصلاحية كاملة حتى لا ينكسر الموقع قبل ترقيته
+-- «حساب الموقع القديم»: فقط حسابات المصادقة الموجودة لحظة تشغيل هذا الترحيل
+-- تُدرج تلقائياً في قائمة allowed الحسابات القديمة (app_config ← legacy_admins).
+-- أي حساب يُنشأ بعد الترحيل يمرّ إجبارياً عبر نظام profiles والصلاحيات —
+-- فلا يستطيع مهاجم التسجيل بنفسه والادعاء أنه «مالك النظام القديم».
+INSERT INTO public.app_config (key, value)
+SELECT 'legacy_admins', COALESCE(jsonb_agg(u.id::text), '[]'::jsonb)
+FROM auth.users u
+ON CONFLICT (key) DO NOTHING;
+
+-- هل المستخدم الحالي ضمن القائمة البيضاء لحسابات النظام القديم؟
 CREATE OR REPLACE FUNCTION public.is_legacy_admin()
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT auth.role() = 'authenticated'
-     AND NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid());
+     AND EXISTS (
+       SELECT 1 FROM public.app_config
+       WHERE key = 'legacy_admins' AND value ? (auth.uid())::text
+     );
 $$;
 
 -- هل سنتر معين فعّال (غير موقوف)؟ تُستخدم لمنع الكتابة عند الإيقاف
@@ -320,12 +331,18 @@ $$;
 -- ٥) مشغلات الحماية والمزامنة
 -- ============================================================================
 
--- كود السنتر ثابت: لا يغيّره إلا المطور (سوبر أدمن)
+-- حماية ثوابت السنتر: الكود ثابت، والإيقاف/التفعيل (status) بيد المطور فقط —
+-- فلا يستطيع مسئول السنتر تغيير كوده ولا إعادة تفعيل سنتره بعد إيقافه
 CREATE OR REPLACE FUNCTION public.guard_center_code()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-  IF NEW.code IS DISTINCT FROM OLD.code AND public.my_role() IS DISTINCT FROM 'super_admin' AND NOT public.is_legacy_admin() THEN
-    RAISE EXCEPTION 'code_is_fixed';
+  IF public.my_role() IS DISTINCT FROM 'super_admin' AND NOT public.is_legacy_admin() THEN
+    IF NEW.code IS DISTINCT FROM OLD.code THEN
+      RAISE EXCEPTION 'code_is_fixed';
+    END IF;
+    IF NEW.status IS DISTINCT FROM OLD.status THEN
+      RAISE EXCEPTION 'status_managed_by_developer';
+    END IF;
   END IF;
   RETURN NEW;
 END;

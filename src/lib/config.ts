@@ -54,14 +54,8 @@ export function getConfigUrl(): string {
 // التحقق والإعدادات المدمجة
 // ------------------------------------------------------------
 
-export function isValidSupabaseUrl(url: string): boolean {
-  try {
-    const u = new URL(url.trim());
-    return u.protocol === 'https:' && u.hostname.length > 3;
-  } catch {
-    return false;
-  }
-}
+export { isValidSupabaseUrl, dbConfigFromRemote } from './utils';
+import { isValidSupabaseUrl } from './utils';
 
 export function builtinConfig(): SupabaseConfig | null {
   const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, string>;
@@ -155,11 +149,3 @@ export async function loadCachedRemoteConfig(): Promise<RemoteConfig | null> {
   return null;
 }
 
-/** استخراج مفاتيح قاعدة البيانات من رد كلاود فلير */
-export function dbConfigFromRemote(remote: RemoteConfig | null | undefined): { url: string; anonKey: string } | null {
-  if (!remote?.database) return null;
-  const url = (remote.database.url ?? '').trim();
-  const key = (remote.database.anon_key ?? '').trim();
-  if (url && key && isValidSupabaseUrl(url)) return { url, anonKey: key };
-  return null;
-}

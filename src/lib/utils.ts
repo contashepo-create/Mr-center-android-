@@ -94,6 +94,38 @@ export function formatMoney(amount: number | null | undefined): string {
   return `${n.toLocaleString('en-EG', { maximumFractionDigits: 2 })} ج.م`;
 }
 
+/** التحقق من صيغة رابط قاعدة البيانات */
+export function isValidSupabaseUrl(url: string): boolean {
+  try {
+    const u = new URL(url.trim());
+    return u.protocol === 'https:' && u.hostname.length > 3;
+  } catch {
+    return false;
+  }
+}
+
+/** استخراج مفاتيح قاعدة البيانات من ردّ كلاود فلير */
+export function dbConfigFromRemote(remote: unknown): { url: string; anonKey: string } | null {
+  const db = (remote as { database?: { url?: string; anon_key?: string } } | null)?.database;
+  if (!db) return null;
+  const url = (db.url ?? '').trim();
+  const key = (db.anon_key ?? '').trim();
+  if (url && key && isValidSupabaseUrl(url)) return { url, anonKey: key };
+  return null;
+}
+
+/** مقارنة أرقام الإصدارات النصية: "1.0.10" أكبر من "1.0.2" */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = b.split('.').map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const da = pa[i] ?? 0;
+    const db = pb[i] ?? 0;
+    if (da !== db) return da - db;
+  }
+  return 0;
+}
+
 /** تحويل رسائل أخطاء Supabase إلى رسائل عربية مفهومة */
 export function arabicError(err: unknown): string {
   const msg = String((err as any)?.message ?? err ?? '').toLowerCase();
