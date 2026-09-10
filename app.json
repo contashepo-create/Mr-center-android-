@@ -27,14 +27,26 @@
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0A0E1A"
       },
-      "permissions": ["INTERNET", "ACCESS_NETWORK_STATE", "REQUEST_INSTALL_PACKAGES"]
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "REQUEST_INSTALL_PACKAGES"
+      ]
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "الكاميرا مطلوبة لمسح باركود حضور الطلاب من تطبيقاتهم",
+          "recordAudioPermission": false
+        }
+      ]
     ],
     "extra": {
-      "configUrl": "https://mr-center-config.YOUR-SUBDOMAIN.workers.dev/config",
+      "configUrl": "https://mr-center-config.mobileshop2026.workers.dev/config",
       "supabaseUrl": "",
       "supabaseAnonKey": ""
     }

@@ -7,16 +7,17 @@ import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, View } from 'react-native';
 import {
-  AppButton, Card, EmptyState, ListItem, LoadingView, SectionTitle, StatCard,
+  AppButton, Card, EmptyState, ListItem, LoadingView, NoAccess, SectionTitle, StatCard,
 } from '../../src/components/controls';
 import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { FormMessage, OptionPicker } from '../../src/components/pickers';
+import { can, useTeacherGroupIds } from '../../src/lib/staff';
 import {
-  fetchDues, fetchGroups, fetchStudents, generateDuesForGroup,
+  fetchDues, fetchGroups, fetchStudents, generateDuesForGroup, logActivity,
 } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import type { Due, Group, Student } from '../../src/lib/types';
-import { arabicError, arabicMonth, formatMoney } from '../../src/lib/utils';
+import { arabicError, arabicMonth, billingLabel, formatMoney } from '../../src/lib/utils';
 import { colors, font, spacing } from '../../src/theme';
 
 export default function PaymentsScreen() {
@@ -33,6 +34,8 @@ export default function PaymentsScreen() {
   const [genGroup, setGenGroup] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const teacherScope = useTeacherGroupIds();
+  const visibleGroups = teacherScope ? groups.filter((g) => teacherScope.includes(g.id)) : groups;
 
   const load = useCallback(async () => {
     if (!centerId) return;
@@ -52,8 +55,18 @@ export default function PaymentsScreen() {
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
-  const studentName = (id: string) => students.find((s) => s.id === id)?.name ?? 'طالب';
-  const studentOf = (id: string) => students.find((s) => s.id === id);
+  const studentName = (id: string) => students.find((s) => s.id === id)?.name ?? 'طالب محذوف';
+  // المستحق اليتيم (طالبه حُذف): يُعرض كسجل مالي بلا تنقل لملف غير موجود
+  const isOrphan = (studentId: string) => !students.some((s) => s.id === studentId);
+
+  if (!can(profile, 'collect')) {
+    return (
+      <GradientScreen>
+        <BackHeader title="المدفوعات والمستحقات" />
+        <NoAccess />
+      </GradientScreen>
+    );
+  }
 
   const generate = async () => {
     setMessage(null);
@@ -61,10 +74,17 @@ export default function PaymentsScreen() {
     if (!group) return;
     setBusy(true);
     try {
-      const created = await generateDuesForGroup(centerId, group, month, year);
-      setMessage(created > 0
-        ? `تم توليد ${created} مستحق لمجموعة «${group.name}»`
-        : 'كل طلاب المجموعة لديهم مستحقات مسجلة لهذا الشهر بالفعل');
+      const res = await generateDuesForGroup(centerId, group, month, year);
+      if (!res.skippedNoSessions && res.created > 0) {
+        await logActivity(centerId, 'dues_generated', `${res.created} مستحق لمجموعة «${group.name}» بقيمة ${formatMoney(res.amount)}`);
+      }
+      if (res.skippedNoSessions) {
+        setMessage('التسعير بالحصة ولا توجد حصص مسجلة لهذا الشهر بعد — سجّل حضور المجموعة أولاً ثم ولّد');
+      } else {
+        setMessage(res.created > 0
+          ? `تم توليد ${res.created} مستحق بقيمة ${formatMoney(res.amount)} لمجموعة «${group.name}»`
+          : 'كل طلاب المجموعة لديهم مستحقات مسجلة لهذا الشهر بالفعل');
+      }
       await load();
     } catch (e) {
       Alert.alert('تعذر التوليد', arabicError(e));
@@ -125,10 +145,12 @@ export default function PaymentsScreen() {
                   label="اختر المجموعة"
                   icon="albums"
                   value={genGroup}
-                  options={groups.map((g) => ({
+                  options={visibleGroups.map((g) => ({
                     value: g.id,
                     label: g.name,
-                    subtitle: `${g.students_count} طالب · ${formatMoney(g.monthly_fee)}`,
+                    subtitle: `${g.students_count} طالب · ${formatMoney(
+                      g.billing_type === 'weekly' ? g.weekly_price : g.billing_type === 'per_session' ? g.session_price : g.monthly_fee,
+                    )} (${billingLabel(g.billing_type)})`,
                   }))}
                   onChange={setGenGroup}
                   placeholder="اختر المجموعة..."
@@ -152,40 +174,50 @@ export default function PaymentsScreen() {
               ) : null}
             </>
           }
-          renderItem={({ item }) => (
-            <ListItem
-              title={studentName(item.student_id)}
-              subtitle={formatMoney(item.amount)}
-              icon="time"
-              iconColor={colors.warning}
-              badge={{ text: 'معلق', color: colors.warning, bg: colors.warningBg }}
-              right={
-                <AppButton
-                  title="تحصيل"
-                  icon="cash"
-                  small
-                  variant="success"
-                  onPress={() => router.push(`/student/${item.student_id}?pay=${item.id}`)}
-                />
-              }
-              onPress={() => router.push(`/student/${item.student_id}`)}
-            />
-          )}
+          renderItem={({ item }) => {
+            const orphan = isOrphan(item.student_id);
+            return (
+              <ListItem
+                title={studentName(item.student_id)}
+                subtitle={formatMoney(item.amount)}
+                icon="time"
+                iconColor={orphan ? colors.textMuted : colors.warning}
+                badge={orphan
+                  ? { text: 'سجل مالي محفوظ', color: colors.textMuted, bg: colors.surfaceAlt }
+                  : { text: 'معلق', color: colors.warning, bg: colors.warningBg }}
+                right={
+                  orphan ? undefined : (
+                    <AppButton
+                      title="تحصيل"
+                      icon="cash"
+                      small
+                      variant="success"
+                      onPress={() => router.push(`/student/${item.student_id}?pay=${item.id}`)}
+                    />
+                  )
+                }
+                onPress={orphan ? undefined : () => router.push(`/student/${item.student_id}`)}
+              />
+            );
+          }}
           ListFooterComponent={
             paidList.length > 0 ? (
               <>
                 <SectionTitle title="مستحقات مسددة" />
-                {paidList.slice(0, 20).map((item) => (
-                  <ListItem
-                    key={item.id}
-                    title={studentName(item.student_id)}
-                    subtitle={formatMoney(item.amount)}
-                    icon="checkmark-circle"
-                    iconColor={colors.success}
-                    badge={{ text: 'مسدد', color: colors.success, bg: colors.successBg }}
-                    onPress={() => router.push(`/student/${item.student_id}`)}
-                  />
-                ))}
+                {paidList.slice(0, 20).map((item) => {
+                  const orphan = isOrphan(item.student_id);
+                  return (
+                    <ListItem
+                      key={item.id}
+                      title={studentName(item.student_id)}
+                      subtitle={formatMoney(item.amount)}
+                      icon="checkmark-circle"
+                      iconColor={orphan ? colors.textMuted : colors.success}
+                      badge={{ text: 'مسدد', color: colors.success, bg: colors.successBg }}
+                      onPress={orphan ? undefined : () => router.push(`/student/${item.student_id}`)}
+                    />
+                  );
+                })}
               </>
             ) : null
           }

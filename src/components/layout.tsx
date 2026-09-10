@@ -57,7 +57,16 @@ export function ScreenHeader({
 }
 
 export function BackHeader(props: { title: string; subtitle?: string; right?: React.ReactNode }) {
-  return <ScreenHeader {...props} onBack={() => router.back()} />;
+  return (
+    <ScreenHeader
+      {...props}
+      onBack={() => {
+        // رجوع للشاشة السابقة فعلاً — وإن لم توجد (دخول مباشر) نعود للجذر ليوجهك الحارس لبيتك
+        if (router.canGoBack()) router.back();
+        else router.replace('/');
+      }}
+    />
+  );
 }
 
 /** حاوية تتعامل مع لوحة المفاتيح وتدعم التمرير */

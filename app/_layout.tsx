@@ -8,6 +8,8 @@ import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SessionProvider, useSession } from '../src/lib/session';
+import { isOwner, isStaff } from '../src/lib/staff';
+import { getSupabase } from '../src/lib/supabase';
 import { GradientScreen } from '../src/components/layout';
 import { UpdateManager } from '../src/components/UpdateManager';
 import { colors, font, spacing } from '../src/theme';
@@ -48,6 +50,13 @@ function RouterGuard() {
     // بجلسة لكن بلا ملف شخصي بعد: اسمح بالتواجد في المصادقة لإكمال التسجيل
     if (!profile) return;
 
+    // حساب موقوف إدارياً: خروج فوري بدل البقاء داخل التطبيق
+    if (profile.is_active === false) {
+      getSupabase().auth.signOut().catch(() => {});
+      router.replace('/');
+      return;
+    }
+
     // الاشتراك منتهي/موقوف (لغير المطور) → شاشة الحظر
     const blocked = profile.role !== 'super_admin'
       && subscription
@@ -59,19 +68,23 @@ function RouterGuard() {
 
     // توجيه حسب الصلاحية
     if (profile.role === 'student') {
-      const allowed = ['home', 'my-attendance', 'my-grades', 'my-payments', 'profile', 'about'];
+      const allowed = ['home', 'my-attendance', 'my-grades', 'my-payments', 'profile', 'about',
+        'my-exams', 'my-inquiries', 'my-surveys', 'my-library', 'my-schedule', 'my-notifications'];
       if (!root || root === 'index' || inAuth || inDev || !allowed.includes(root)) {
         router.replace('/home');
       }
-    } else if (profile.role === 'center_admin') {
+    } else if (isOwner(profile) || isStaff(profile)) {
       const allowed = ['dashboard', 'students', 'groups', 'attendance', 'more', 'payments',
-        'announcements', 'grades-list', 'admin-settings', 'student', 'about'];
+        'announcements', 'grades-list', 'admin-settings', 'student', 'about', 'scan',
+        'exams', 'inquiries', 'surveys', 'library', 'schedule', 'reports', 'guide', 'whatsapp', 'notifications', 'dev-notices', 'teachers', 'subscription', 'activity'];
       if (!root || root === 'index' || inAuth || inDev || !allowed.includes(root)) {
         router.replace('/dashboard');
       }
     } else if (profile.role === 'super_admin') {
-      // المطور: موطنه لوحة التحكم
-      if (!root || root === 'index' || inAuth) router.replace('/developer');
+      // المطور: موطنه لوحة التحكم — وأي شاشة أخرى (عدا حول) تُعاد للوحة
+      if ((!root || root === 'index' || inAuth || !inDev) && root !== 'about' && root !== 'blocked') {
+        router.replace('/developer');
+      }
     }
   }, [ready, session, profile, subscription, segments, router]);
 
@@ -79,7 +92,12 @@ function RouterGuard() {
 
   return (
     <>
-      <Stack screenOptions={{ headerShown: false, animation: 'slide_from_left' }}>
+      <Stack screenOptions={{
+        headerShown: false,
+        // تلاشي ناعم بخلفية داكنة: بلا وميض أبيض ولا حركة مفاجئة
+        animation: 'fade',
+        contentStyle: { backgroundColor: colors.bg },
+      }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="about" />
         <Stack.Screen name="blocked" />

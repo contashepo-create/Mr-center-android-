@@ -1,59 +1,71 @@
 // ============================================================
-// اشتراكات السناتر (للمطور): تفعيل باقة شهرية/سنوية/مخصصة لأي سنتر
+// اشتراكات السناتر (المطور): باقات احترافية + اعتماد طلبات الترقية
 // ============================================================
 
 import React, { useCallback, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { AppButton, Card, EmptyState, LoadingView, SectionTitle } from '../../src/components/controls';
+import { DeveloperGate } from '../../src/components/DeveloperGate';
 import { BackHeader, GradientScreen, KeyboardScreen } from '../../src/components/layout';
-import { OptionPicker } from '../../src/components/pickers';
+import { FormMessage, OptionPicker } from '../../src/components/pickers';
 import {
-  devFetchCenters, devSetCenterStatus, devUpsertSubscription, type CenterWithSub,
+  devFetchCenters, devFetchPendingRequests, devResolveRequest, devSetCenterStatus,
+  devUpsertSubscription, logActivity, type CenterWithSub,
 } from '../../src/lib/api';
-import { arabicError } from '../../src/lib/utils';
+import { useSession } from '../../src/lib/session';
+import { planLabel, PRODUCTS } from '../../src/lib/billing';
+import type { PlanType, SubscriptionRequest } from '../../src/lib/types';
+import { arabicError, formatDate, formatMoney } from '../../src/lib/utils';
 import { colors, font, spacing } from '../../src/theme';
 
-const PLANS = [
-  { value: 'monthly', label: 'شهرية — 30 يوم', months: 1 },
-  { value: 'yearly', label: 'سنوية — 365 يوم', months: 12 },
-  { value: 'custom', label: 'مخصصة — بمدة تختارها', months: 0 },
-];
-
-const DURATIONS = [
-  { value: '1', label: 'شهر واحد' },
-  { value: '3', label: '3 أشهر' },
-  { value: '6', label: '6 أشهر' },
-  { value: '12', label: 'سنة كاملة' },
-  { value: '24', label: 'سنتان' },
-];
+type ReqRow = SubscriptionRequest & { center_name?: string; center_code?: string };
 
 export default function DevSubscriptionsScreen() {
+  const { profile, ready } = useSession();
   const [centers, setCenters] = useState<CenterWithSub[]>([]);
+  const [requests, setRequests] = useState<ReqRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [plan, setPlan] = useState<string>('monthly');
-  const [duration, setDuration] = useState<string>('1');
+  const [plan, setPlan] = useState<string>('center_full');
+  const [durationIdx, setDurationIdx] = useState('0');
   const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try { setCenters(await devFetchCenters()); } catch { /* ignore */ }
-    setLoading(false);
+    try {
+      const [cs, rq] = await Promise.all([devFetchCenters(), devFetchPendingRequests()]);
+      setCenters(cs);
+      setRequests(rq);
+    } catch { /* ignore */ } finally {
+      setLoading(false);
+    }
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
+  if (!ready) {
+    return <GradientScreen><LoadingView message="..." /></GradientScreen>;
+  }
+  if (profile?.role !== 'super_admin') return <DeveloperGate />;
+
   const selected = centers.find((c) => c.id === selectedId);
+  const product = PRODUCTS.find((p) => p.plan === plan) ?? PRODUCTS[0];
+  const duration = product.durations[Number(durationIdx)] ?? product.durations[0];
 
   const activate = async () => {
     if (!selected) return;
-    const planInfo = PLANS.find((p) => p.value === plan)!;
-    const months = plan === 'custom' ? Number(duration) : planInfo.months;
     setBusy(true);
+    setMsg(null);
     try {
-      await devUpsertSubscription({ centerId: selected.id, planType: plan as any, months, status: 'active' });
+      await devUpsertSubscription({
+        centerId: selected.id, planType: product.plan as PlanType,
+        months: duration.months, status: 'active',
+        notes: `${product.name} — ${duration.label} (${formatMoney(duration.price)}) — تفعيل يدوي`,
+      });
       await devSetCenterStatus(selected.id, 'active');
-      Alert.alert('تم التفعيل', `تم تفعيل اشتراك «${selected.name}» لمدة ${months} شهر`);
+      await logActivity(selected.id, 'subscription_activated', `${product.name} (${duration.label}) — تفعيل يدوي من المطور`);
+      setMsg(`تم تفعيل «${product.name}» لسنتر «${selected.name}» (${duration.label})`);
       await load();
     } catch (e) {
       Alert.alert('خطأ', arabicError(e));
@@ -62,30 +74,84 @@ export default function DevSubscriptionsScreen() {
     }
   };
 
-  const suspend = async () => {
-    if (!selected) return;
+  const suspend = async (c: CenterWithSub) => {
     setBusy(true);
     try {
-      await devUpsertSubscription({ centerId: selected.id, planType: 'custom', months: 0, status: 'suspended', notes: 'إيقاف من المطور' });
-      await devSetCenterStatus(selected.id, 'suspended');
-      Alert.alert('تم الإيقاف', `تم إيقاف اشتراك «${selected.name}»`);
+      await devUpsertSubscription({ centerId: c.id, planType: 'custom', months: 0, status: 'suspended', notes: 'إيقاف من المطور' });
+      await devSetCenterStatus(c.id, 'suspended');
+      await logActivity(c.id, 'subscription_suspended', 'إيقاف من المطور');
       await load();
     } catch (e) {
       Alert.alert('خطأ', arabicError(e));
     } finally {
       setBusy(false);
     }
+  };
+
+  const resolveRequest = async (r: ReqRow, approve: boolean) => {
+    const action = approve ? 'اعتماد طلب الترقية' : 'رفض طلب الترقية';
+    Alert.alert(action, `${planLabel(r.plan)} لسنتر «${r.center_name}» بمبلغ ${formatMoney(r.amount)}؟`, [
+      { text: 'إلغاء', style: 'cancel' },
+      {
+        text: approve ? 'اعتماد وتفعيل' : 'رفض',
+        style: approve ? 'default' : 'destructive',
+        onPress: async () => {
+          setBusy(true);
+          try {
+            if (approve) {
+              await devUpsertSubscription({
+                centerId: r.center_id, planType: r.plan as PlanType,
+                months: r.months, status: 'active',
+                notes: `ترقية معتمدة — تحويل ${formatMoney(r.amount)} بتاريخ ${r.transfer_at}`,
+              });
+              await devSetCenterStatus(r.center_id, 'active');
+              await logActivity(r.center_id, 'subscription_upgraded', `${planLabel(r.plan)} — اعتماد طلب بتحويل ${formatMoney(r.amount)}`);
+            }
+            await devResolveRequest(r.id, r.center_id, approve);
+            await logActivity(r.center_id, approve ? 'request_approved' : 'request_rejected', `طلب ${planLabel(r.plan)} — ${formatMoney(r.amount)}`);
+            await load();
+          } catch (e) {
+            Alert.alert('خطأ', arabicError(e));
+          } finally {
+            setBusy(false);
+          }
+        },
+      },
+    ]);
   };
 
   return (
     <GradientScreen>
-      <BackHeader title="اشتراكات السناتر" subtitle="تحكم كامل في الباقات" />
+      <BackHeader title="اشتراكات السناتر" subtitle="باقات وطلبات ترقية" />
       {loading ? (
         <LoadingView message="جاري التحميل..." />
       ) : (
         <KeyboardScreen>
-          {/* حالة السناتر */}
-          <SectionTitle title="اختر السنتر" />
+          {/* طلبات الترقية المعلقة */}
+          <SectionTitle title={`طلبات الترقية المعلقة (${requests.length})`} />
+          {requests.length === 0 ? (
+            <Card><Text style={styles.dimText}>لا توجد طلبات معلقة</Text></Card>
+          ) : requests.map((r) => (
+            <Card key={r.id} style={styles.reqCard}>
+              <Text style={styles.reqTitle}>
+                {r.center_name} ({r.center_code})
+              </Text>
+              <Text style={styles.reqMeta}>
+                {planLabel(r.plan)} · {formatMoney(r.amount)} · تحويل: {r.transfer_at}
+                {r.notes ? `\nملاحظات: ${r.notes}` : ''} · {formatDate(r.created_at)}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md }}>
+                <View style={{ flex: 1 }}>
+                  <AppButton title="اعتماد وتفعيل" icon="checkmark" small variant="success" onPress={() => resolveRequest(r, true)} loading={busy} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <AppButton title="رفض" icon="close" small variant="danger" onPress={() => resolveRequest(r, false)} loading={busy} />
+                </View>
+              </View>
+            </Card>
+          ))}
+
+          <SectionTitle title="تفعيل يدوي لأي سنتر" />
           <OptionPicker
             icon="business"
             value={selectedId}
@@ -93,11 +159,11 @@ export default function DevSubscriptionsScreen() {
               value: c.id,
               label: `${c.name} (${c.code})`,
               subtitle: c.latest_sub
-                ? `حتى ${c.latest_sub.ends_on} · ${c.latest_sub.status === 'active' ? 'فعّال' : 'موقوف/منتهي'}`
+                ? `${planLabel(c.latest_sub.plan_type)} حتى ${c.latest_sub.ends_on} · ${c.latest_sub.status === 'active' ? 'فعّال' : 'موقوف/منتهي'}`
                 : 'بدون اشتراك',
             }))}
             onChange={setSelectedId}
-            placeholder="اختر سنتراً لإدارة اشتراكه..."
+            placeholder="اختر سنتراً..."
           />
 
           {selected ? (
@@ -116,10 +182,7 @@ export default function DevSubscriptionsScreen() {
                   <>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
                       <Text style={styles.dim}>الباقة:</Text>
-                      <Text style={styles.value}>
-                        {selected.latest_sub.plan_type === 'monthly' ? 'شهرية'
-                          : selected.latest_sub.plan_type === 'yearly' ? 'سنوية' : 'مخصصة'}
-                      </Text>
+                      <Text style={styles.value}>{planLabel(selected.latest_sub.plan_type)}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                       <Text style={styles.dim}>تنتهي في:</Text>
@@ -131,24 +194,25 @@ export default function DevSubscriptionsScreen() {
                 )}
               </Card>
 
-              <SectionTitle title="تفعيل / تجديد الاشتراك" />
+              <SectionTitle title="تفعيل باقة احترافية" />
               <Card>
                 <OptionPicker
-                  label="نوع الباقة"
+                  label="الباقة"
                   icon="card"
                   value={plan}
-                  options={PLANS.map((p) => ({ value: p.value, label: p.label }))}
-                  onChange={setPlan}
+                  options={PRODUCTS.map((p) => ({ value: p.plan, label: `${p.name} — من ${formatMoney(p.durations[0].price)}/شهر` }))}
+                  onChange={(v) => { setPlan(v); setDurationIdx('0'); }}
                 />
-                {plan === 'custom' ? (
-                  <OptionPicker
-                    label="المدة"
-                    icon="time"
-                    value={duration}
-                    options={DURATIONS}
-                    onChange={setDuration}
-                  />
-                ) : null}
+                <OptionPicker
+                  label="المدة"
+                  icon="time"
+                  value={durationIdx}
+                  options={product.durations.map((d, i) => ({
+                    value: String(i), label: `${d.label} — ${formatMoney(d.price)}`,
+                  }))}
+                  onChange={setDurationIdx}
+                />
+                {msg ? <Text style={styles.okMsg}>{msg}</Text> : null}
                 <AppButton
                   title="تفعيل / تجديد الآن"
                   icon="checkmark-circle"
@@ -161,7 +225,7 @@ export default function DevSubscriptionsScreen() {
                   title="إيقاف الاشتراك"
                   icon="pause-circle"
                   variant="danger"
-                  onPress={suspend}
+                  onPress={() => selected && suspend(selected)}
                   loading={busy}
                 />
               </Card>
@@ -177,6 +241,11 @@ export default function DevSubscriptionsScreen() {
 
 const styles = StyleSheet.create({
   dim: { color: colors.textSecondary, fontSize: font.md },
+  dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
   value: { color: colors.text, fontSize: font.md, fontWeight: '800' },
   state: { fontSize: font.md, fontWeight: '900' },
+  okMsg: { color: colors.success, fontSize: font.sm, fontWeight: '700', textAlign: 'right', marginBottom: spacing.md },
+  reqCard: { marginBottom: spacing.sm },
+  reqTitle: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
+  reqMeta: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: 4, lineHeight: 20 },
 });

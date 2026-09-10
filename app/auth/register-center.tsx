@@ -3,17 +3,19 @@
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { AppButton, AppInput, Card } from '../../src/components/controls';
 import { BackHeader, GradientScreen, KeyboardScreen } from '../../src/components/layout';
 import { checkAvailability, lookupCenterByCode, registerCenterOwner } from '../../src/lib/api';
+import { savePendingRegistration } from '../../src/lib/pendingRegistration';
 import { useSession } from '../../src/lib/session';
 import {
-  arabicError, isValidCenterCode, isValidEmail, isValidPhone,
+  arabicError, isAllowedEmailDomain, isValidCenterCode, isValidEmail, isValidPhone,
   normalizeCenterCode, normalizePhone,
 } from '../../src/lib/utils';
-import { FormMessage } from '../../src/components/pickers';
+import { FormMessage, OptionPicker } from '../../src/components/pickers';
 import { colors, font, radius, spacing } from '../../src/theme';
 
 type CodeState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
@@ -26,6 +28,7 @@ export default function RegisterCenterScreen() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
+  const [kind, setKind] = useState<'center' | 'solo'>('center');
   const [codeState, setCodeState] = useState<CodeState>('idle');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +58,9 @@ export default function RegisterCenterScreen() {
     if (!centerName.trim()) return setError('أدخل اسم السنتر');
     if (!ownerName.trim()) return setError('أدخل اسم صاحب السنتر / المدرس');
     if (!isValidEmail(email)) return setError('أدخل بريداً إلكترونياً صحيحاً');
+    if (!isAllowedEmailDomain(email)) {
+      return setError('استخدم بريداً من موفر معروف (Gmail / Yahoo / Outlook / iCloud...) — الإيميلات المؤقتة مرفوضة');
+    }
     if (!isValidPhone(phone)) return setError('أدخل رقم هاتف صحيح (8 أرقام على الأقل)');
     if (password.length < 6) return setError('كلمة المرور يجب ألا تقل عن 6 أحرف');
     if (!isValidCenterCode(normalizedCode)) {
@@ -82,13 +88,36 @@ export default function RegisterCenterScreen() {
         email: email.trim(),
         phone: normalizePhone(phone),
         password,
+        kind,
       });
       await refresh();
       Alert.alert(
         'تم إنشاء حسابك بنجاح',
-        `سنتر «${centerName.trim()}» جاهز الآن بكود «${normalizedCode}».\nشارك هذا الكود مع طلابك ليسجلوا به.`,
+        kind === 'solo'
+          ? `حسابك كمدرس خصوصي جاهز بكود «${normalizedCode}».\nشاركه مع طلابك ليسجلوا به.`
+          : `سنتر «${centerName.trim()}» جاهز الآن بكود «${normalizedCode}».\nشارك هذا الكود مع طلابك ومدرسيك ليسجلوا به.`,
       );
     } catch (e) {
+      const m = String((e as any)?.message ?? '').toLowerCase();
+      // التأكيد مفعّل: نحفظ البيانات معلقة ونطلب تأكيد البريد ثم الدخول
+      if (m.includes('email_confirmation_required')) {
+        await savePendingRegistration({
+          kind: 'center',
+          email: email.trim().toLowerCase(),
+          centerName: centerName.trim(),
+          code: normalizedCode,
+          ownerName: ownerName.trim(),
+          phone: normalizePhone(phone),
+          centerKind: kind,
+        });
+        setBusy(false);
+        Alert.alert(
+          'أكّد بريدك الإلكتروني',
+          'أرسلنا رابط تأكيد إلى بريدك لمنع الحسابات الوهمية.\nافتحه من نفس هذا الجهاز ثم سجّل دخولك وسيُنشأ سنترك تلقائياً.',
+          [{ text: 'تسجيل الدخول', onPress: () => router.push('/auth/login-admin') }],
+        );
+        return;
+      }
       setError(arabicError(e));
     } finally {
       setBusy(false);
@@ -97,13 +126,30 @@ export default function RegisterCenterScreen() {
 
   return (
     <GradientScreen>
-      <BackHeader title="إنشاء حساب سنتر جديد" subtitle="لأصحاب السناتر والمدرسين" />
+      <BackHeader title="إنشاء حساب جديد" subtitle="سنتر متكامل أو مدرس خصوصي" />
       <KeyboardScreen>
         <Card>
+          <OptionPicker
+            label="نوع الحساب"
+            icon="briefcase"
+            value={kind}
+            options={[
+              { value: 'center', label: 'سنتر تعليمي متكامل', subtitle: 'صلاحيات كاملة + إضافة مدرسين تابعين لكل مجموعة' },
+              { value: 'solo', label: 'مدرس خصوصي مستقل', subtitle: 'نفس الوظائف لإدارة موادك وطلابك — بدون مدرسين تابعين' },
+            ]}
+            onChange={(v) => setKind(v as 'center' | 'solo')}
+          />
+          <View style={styles.kindNote}>
+            <Ionicons name="information-circle" size={18} color={colors.info} />
+            <Text style={styles.kindNoteText}>
+              ملاحظة الأسعار: اشتراك السنتر المتكامل أعلى من اشتراك المدرس الخصوصي —
+              اختر ما يناسب حجم عملك، وسيطلب طلابك كودك عند تسجيلهم في الحالتين.
+            </Text>
+          </View>
           <AppInput
-            label="اسم السنتر"
+            label={kind === 'solo' ? 'اسم المدرس / العلامة' : 'اسم السنتر'}
             icon="business"
-            placeholder="مثال: سنتر المستقبل"
+            placeholder={kind === 'solo' ? 'مثال: مستر أحمد — فيزياء' : 'مثال: سنتر المستقبل'}
             value={centerName}
             onChangeText={setCenterName}
           />
@@ -191,7 +237,7 @@ export default function RegisterCenterScreen() {
         </Card>
 
         <Text style={styles.footer}>
-          بإنشائك الحساب ستحصل على اشتراك تجريبي شهري، وتظهر حالة اشتراكك في صفحة الإعدادات.
+          بإنشائك الحساب ستحصل على اشتراك تجريبي 7 أيام بمزايا كاملة، وبعدها تطلب الترقية من المطور.
         </Text>
       </KeyboardScreen>
     </GradientScreen>
@@ -199,6 +245,14 @@ export default function RegisterCenterScreen() {
 }
 
 const styles = StyleSheet.create({
+  kindNote: {
+    flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start',
+    backgroundColor: colors.infoBg, borderWidth: 1, borderColor: colors.info + '44',
+    borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md,
+  },
+  kindNoteText: {
+    flex: 1, color: colors.info, fontSize: font.sm, textAlign: 'right', lineHeight: 20,
+  },
   codeNote: {
     flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start',
     backgroundColor: colors.warningBg, borderWidth: 1, borderColor: colors.warning + '44',

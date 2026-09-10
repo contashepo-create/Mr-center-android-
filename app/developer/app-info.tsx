@@ -5,7 +5,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text } from 'react-native';
-import { AppButton, AppInput, Card, SectionTitle } from '../../src/components/controls';
+import { AppButton, AppInput, Card, LoadingView, SectionTitle } from '../../src/components/controls';
+import { DeveloperGate } from '../../src/components/DeveloperGate';
 import { BackHeader, GradientScreen, KeyboardScreen } from '../../src/components/layout';
 import { FormMessage } from '../../src/components/pickers';
 import { devFetchPublicConfig, devSavePublicConfig } from '../../src/lib/api';
@@ -14,7 +15,7 @@ import { arabicError } from '../../src/lib/utils';
 import { colors, font, spacing } from '../../src/theme';
 
 export default function DevAppInfoScreen() {
-  const { refresh } = useSession();
+  const { profile, ready, refresh } = useSession();
   const [loaded, setLoaded] = useState(false);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -25,6 +26,10 @@ export default function DevAppInfoScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (profile?.role !== 'super_admin') {
+      setLoaded(true);
+      return;
+    }
     devFetchPublicConfig()
       .then((cfg) => {
         setTitle(cfg.about_title ?? '');
@@ -35,7 +40,7 @@ export default function DevAppInfoScreen() {
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
-  }, []);
+  }, [profile?.role]);
 
   const save = async () => {
     setError(null);
@@ -58,6 +63,15 @@ export default function DevAppInfoScreen() {
       setBusy(false);
     }
   };
+
+  if (!ready) {
+    return (
+      <GradientScreen>
+        <LoadingView message="..." />
+      </GradientScreen>
+    );
+  }
+  if (profile?.role !== 'super_admin') return <DeveloperGate />;
 
   return (
     <GradientScreen>

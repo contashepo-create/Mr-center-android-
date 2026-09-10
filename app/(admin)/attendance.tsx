@@ -3,19 +3,20 @@
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { AppButton, AppInput, Card, EmptyState, LoadingView } from '../../src/components/controls';
+import { AppButton, Card, EmptyState, LoadingView, NoAccess } from '../../src/components/controls';
 import { GradientScreen, ScreenHeader } from '../../src/components/layout';
 import { OptionPicker } from '../../src/components/pickers';
+import { can, useTeacherGroupIds } from '../../src/lib/staff';
 import {
-  fetchAttendanceForSession, fetchGroups, fetchStudents,
-  getOrCreateSession, saveAttendance,
+  fetchAttendanceForSession, fetchGroupMembers, fetchGroups,
+  findSession, getOrCreateSession, saveAttendance,
 } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import type { AttendanceStatus, Group, SessionRecord, Student } from '../../src/lib/types';
-import { arabicError, formatDate, todayIso } from '../../src/lib/utils';
+import { arabicError, formatDate, shiftDateIso, todayIso } from '../../src/lib/utils';
 import { colors, font, radius, spacing } from '../../src/theme';
 
 interface Row {
@@ -35,6 +36,8 @@ export default function AttendanceScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingSheet, setLoadingSheet] = useState(false);
   const [busy, setBusy] = useState(false);
+  const teacherScope = useTeacherGroupIds();
+  const visibleGroups = teacherScope ? groups.filter((g) => teacherScope.includes(g.id)) : groups;
 
   const loadGroups = useCallback(async () => {
     if (!centerId) return;
@@ -44,19 +47,20 @@ export default function AttendanceScreen() {
 
   useFocusEffect(useCallback(() => { void loadGroups(); }, [loadGroups]));
 
+  // فتح الكشف بلا إنشاء حصة — الحصة تُنشأ فقط عند أول حفظ فعلي
   const openSheet = async (gid: string, forDate: string) => {
+    if (!gid) return;
     setLoadingSheet(true);
     setRows([]);
     setSession(null);
     try {
-      const sess = await getOrCreateSession(centerId, gid, forDate);
+      const sess = await findSession(centerId, gid, forDate);
       setSession(sess);
-      const [allStudents, existing] = await Promise.all([
-        fetchStudents(centerId),
-        fetchAttendanceForSession(sess.id),
+      const [groupStudents, existing] = await Promise.all([
+        fetchGroupMembers(centerId, gid),
+        sess ? fetchAttendanceForSession(sess.id) : Promise.resolve([]),
       ]);
       const existingMap = new Map(existing.map((a) => [a.student_id, a.status]));
-      const groupStudents = allStudents.filter((s) => s.group_id === gid && s.status === 'active');
       setRows(groupStudents.map((s) => ({
         student: s,
         status: (existingMap.get(s.id) as AttendanceStatus) ?? 'present',
@@ -77,10 +81,13 @@ export default function AttendanceScreen() {
     };
 
   const save = async () => {
-    if (!session) return;
+    if (!groupId || rows.length === 0) return;
     setBusy(true);
     try {
-      await saveAttendance(centerId, session.id, rows.map((r) => ({ student_id: r.student.id, status: r.status })));
+      // الحصة تُنشأ هنا فقط عند أول حفظ فعلي
+      const sess = session ?? await getOrCreateSession(centerId, groupId, date);
+      setSession(sess);
+      await saveAttendance(centerId, sess.id, rows.map((r) => ({ student_id: r.student.id, status: r.status })));
       Alert.alert('تم الحفظ', `تم تسجيل حضور ${rows.length} طالب ليوم ${formatDate(date)}`);
     } catch (e) {
       Alert.alert('تعذر الحفظ', arabicError(e));
@@ -91,29 +98,72 @@ export default function AttendanceScreen() {
 
   const presentCount = rows.filter((r) => r.status === 'present' || r.status === 'late').length;
 
+  if (!can(profile, 'attendance')) {
+    return (
+      <GradientScreen>
+        <ScreenHeader title="تسجيل الحضور" />
+        <NoAccess />
+      </GradientScreen>
+    );
+  }
+
   return (
     <GradientScreen>
-      <ScreenHeader title="تسجيل الحضور" subtitle="اختر المجموعة والتاريخ" />
+      <ScreenHeader
+        title="تسجيل الحضور"
+        subtitle="اختر المجموعة والتاريخ"
+        right={
+          <Pressable style={styles.scanBtn} onPress={() => router.push('/scan')}>
+            <Ionicons name="qr-code" size={22} color="#052E22" />
+          </Pressable>
+        }
+      />
 
       <View style={{ paddingHorizontal: spacing.lg }}>
         <OptionPicker
           label="المجموعة"
           icon="albums"
           value={groupId}
-          options={groups.map((g) => ({ value: g.id, label: g.name, subtitle: `${g.students_count} طالب` }))}
-          onChange={(v) => { setGroupId(v); void openSheet(v, date); }}
-          placeholder="اختر المجموعة..."
+          options={visibleGroups.map((g) => ({ value: g.id, label: g.name, subtitle: `${g.students_count} طالب` }))}
+          onChange={(v) => { setGroupId(v); if (v) void openSheet(v, date); }}
+          placeholder={visibleGroups.length === 0 && teacherScope ? 'لم تُسند لك مجموعات بعد' : 'اختر المجموعة...'}
         />
-        <AppInput
-          label="تاريخ الحصة"
-          icon="calendar"
-          value={date}
-          onChangeText={setDate}
-          placeholder="YYYY-MM-DD"
-          textAlign="left"
-          style={{ writingDirection: 'ltr' }}
-          onBlur={() => { if (groupId && /^\d{4}-\d{2}-\d{2}$/.test(date)) void openSheet(groupId, date); }}
-        />
+        <Text style={styles.dateLabel}>تاريخ الحصة</Text>
+        <View style={styles.dateNav}>
+          <Pressable
+            style={styles.dateArrow}
+            onPress={() => {
+              const d = shiftDateIso(date, -1);
+              setDate(d);
+              if (groupId) void openSheet(groupId, d);
+            }}
+          >
+            <Ionicons name="chevron-forward" size={20} color={colors.text} />
+          </Pressable>
+
+          <Pressable
+            style={styles.dateCenter}
+            onPress={() => {
+              const t = todayIso();
+              setDate(t);
+              if (groupId) void openSheet(groupId, t);
+            }}
+          >
+            <Text style={styles.dateText}>{formatDate(date)}</Text>
+            {date !== todayIso() ? <Text style={styles.todayLink}>العودة لليوم</Text> : null}
+          </Pressable>
+          <Pressable
+            style={styles.dateArrow}
+            onPress={() => {
+              // ممنوع تسجيل حضور في تاريخ مستقبلي — السقف هو اليوم
+              const d = shiftDateIso(date, 1) > todayIso() ? todayIso() : shiftDateIso(date, 1);
+              setDate(d);
+              if (groupId) void openSheet(groupId, d);
+            }}
+          >
+            <Ionicons name="chevron-back" size={20} color={colors.text} />
+          </Pressable>
+        </View>
       </View>
 
       {loading ? (
@@ -134,6 +184,7 @@ export default function AttendanceScreen() {
         />
       ) : (
         <>
+          <Text style={styles.activeNote}>الكشف يعرض الطلاب النشطين فقط — الموقوف والمؤرشف خارج الحضور</Text>
           {/* شريط الملخص والتحكم الجماعي */}
           <View style={styles.summaryBar}>
             <Text style={styles.summaryText}>
@@ -142,6 +193,9 @@ export default function AttendanceScreen() {
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
               <Pressable style={styles.bulkBtn} onPress={() => markAll('present')}>
                 <Text style={styles.bulkBtnText}>الكل حاضر</Text>
+              </Pressable>
+              <Pressable style={[styles.bulkBtn, styles.bulkBtnDanger]} onPress={() => markAll('absent')}>
+                <Text style={[styles.bulkBtnText, { color: colors.danger }]}>الكل غائب</Text>
               </Pressable>
             </View>
           </View>
@@ -214,6 +268,34 @@ function StatusButton({ label, icon, color, active, onPress }: {
 }
 
 const styles = StyleSheet.create({
+  activeNote: {
+    color: colors.textMuted, fontSize: font.xs, textAlign: 'center',
+    marginBottom: spacing.sm, paddingHorizontal: spacing.lg,
+  },
+  scanBtn: {
+    width: 40, height: 40, borderRadius: radius.full,
+    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
+  },
+  dateLabel: {
+    color: colors.textSecondary, fontSize: font.sm, fontWeight: '700',
+    marginBottom: spacing.xs + 2, textAlign: 'right',
+  },
+  dateNav: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  dateArrow: {
+    width: 48, height: 52, borderRadius: radius.md,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  dateCenter: {
+    flex: 1, height: 52, borderRadius: radius.md,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  dateText: { color: colors.text, fontSize: font.md, fontWeight: '800' },
+  todayLink: { color: colors.cyan, fontSize: font.xs, fontWeight: '700', marginTop: 2 },
   summaryBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: spacing.lg, marginBottom: spacing.md,
@@ -223,6 +305,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.successBg, borderWidth: 1, borderColor: colors.success + '55',
     borderRadius: radius.full, paddingHorizontal: spacing.md, paddingVertical: 6,
   },
+  bulkBtnDanger: { backgroundColor: colors.dangerBg, borderColor: colors.danger + '55' },
   bulkBtnText: { color: colors.success, fontSize: font.xs, fontWeight: '800' },
   studentRow: { marginBottom: spacing.sm, padding: spacing.md },
   studentInfo: { marginBottom: spacing.sm },

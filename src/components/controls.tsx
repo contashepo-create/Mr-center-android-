@@ -4,9 +4,9 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import React from 'react';
+import React, { useRef } from 'react';
 import {
-  ActivityIndicator, Pressable, StyleSheet, Text, TextInput,
+  ActivityIndicator, Animated, Pressable, StyleSheet, Text, TextInput,
   View, type TextInputProps, type ViewStyle,
 } from 'react-native';
 import { colors, font, gradients, radius, shadow, spacing } from '../theme';
@@ -16,6 +16,14 @@ import { colors, font, gradients, radius, shadow, spacing } from '../theme';
 // ------------------------------------------------------------
 
 type ButtonVariant = 'primary' | 'accent' | 'outline' | 'ghost' | 'danger' | 'success';
+
+/** لون النص فوق كل تدرج (تباين مقروء مع الهوية الجديدة) */
+function gradientInk(variant: ButtonVariant): string {
+  if (variant === 'primary') return '#052E22';
+  if (variant === 'accent') return '#083344';
+  if (variant === 'success') return '#052E16';
+  return '#fff';
+}
 
 export function AppButton({
   title, onPress, icon, variant = 'primary', loading = false,
@@ -31,23 +39,23 @@ export function AppButton({
   style?: ViewStyle;
 }) {
   const isDisabled = disabled || loading;
+  const scale = useRef(new Animated.Value(1)).current;
+  const pressIn = () => Animated.spring(scale, { toValue: 0.96, useNativeDriver: true, speed: 60, bounciness: 0 }).start();
+  const pressOut = () => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 8 }).start();
+  const ink = variant === 'outline' || variant === 'ghost' ? colors.text : gradientInk(variant);
   const content = (
-    <View style={[styles.btnInner, small && styles.btnInnerSmall]}>
+    <Animated.View style={[styles.btnInner, small && styles.btnInnerSmall, { transform: [{ scale }] }]}>
       {loading ? (
-        <ActivityIndicator color={variant === 'outline' || variant === 'ghost' ? colors.text : '#fff'} />
+        <ActivityIndicator color={ink} />
       ) : (
         <>
-          {icon ? <Ionicons name={icon} size={small ? 16 : 19} color={variant === 'outline' || variant === 'ghost' ? colors.text : '#fff'} /> : null}
-          <Text style={[
-            styles.btnText,
-            small && { fontSize: font.sm },
-            (variant === 'outline' || variant === 'ghost') && { color: colors.text },
-          ]}>
+          {icon ? <Ionicons name={icon} size={small ? 16 : 19} color={ink} /> : null}
+          <Text style={[styles.btnText, { color: ink }, small && { fontSize: font.sm }]}>
             {title}
           </Text>
         </>
       )}
-    </View>
+    </Animated.View>
   );
 
   if (variant === 'primary' || variant === 'accent' || variant === 'danger' || variant === 'success') {
@@ -58,10 +66,12 @@ export function AppButton({
     return (
       <Pressable
         onPress={onPress}
+        onPressIn={pressIn}
+        onPressOut={pressOut}
         disabled={isDisabled}
         style={({ pressed }) => [
           styles.btnBase, shadow.glow, style,
-          { opacity: isDisabled ? 0.5 : pressed ? 0.85 : 1 },
+          { opacity: isDisabled ? 0.5 : pressed ? 0.9 : 1 },
         ]}
       >
         <LinearGradient
@@ -78,11 +88,13 @@ export function AppButton({
   return (
     <Pressable
       onPress={onPress}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
       disabled={isDisabled}
       style={({ pressed }) => [
         styles.btnBase,
         variant === 'outline' ? styles.btnOutline : styles.btnGhost,
-        { opacity: isDisabled ? 0.5 : pressed ? 0.75 : 1 },
+        { opacity: isDisabled ? 0.5 : pressed ? 0.8 : 1 },
         style,
       ]}
     >
@@ -96,7 +108,7 @@ export function AppButton({
 // ------------------------------------------------------------
 
 export function AppInput({
-  label, icon, error, rightElement, ...props
+  label, icon, error, rightElement, style, textAlign, ...props
 }: {
   label?: string;
   icon?: keyof typeof Ionicons.glyphMap;
@@ -110,8 +122,8 @@ export function AppInput({
         {icon ? <Ionicons name={icon} size={18} color={colors.textMuted} style={{ marginHorizontal: spacing.sm }} /> : null}
         <TextInput
           placeholderTextColor={colors.textMuted}
-          style={styles.input}
-          textAlign="right"
+          style={[styles.input, style]}
+          textAlign={textAlign ?? 'right'}
           {...props}
         />
         {rightElement}
@@ -126,13 +138,18 @@ export function AppInput({
 // ------------------------------------------------------------
 
 export function Card({ children, style, onPress }: { children: React.ReactNode; style?: ViewStyle; onPress?: () => void }) {
+  const scale = useRef(new Animated.Value(1)).current;
   if (onPress) {
     return (
       <Pressable
         onPress={onPress}
-        style={({ pressed }) => [styles.card, shadow.card, { opacity: pressed ? 0.85 : 1 }, style]}
+        onPressIn={() => Animated.spring(scale, { toValue: 0.98, useNativeDriver: true, speed: 60, bounciness: 0 }).start()}
+        onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 8 }).start()}
+        style={({ pressed }) => [styles.card, shadow.card, { opacity: pressed ? 0.9 : 1 }, style]}
       >
-        {children}
+        <Animated.View style={{ transform: [{ scale }] }}>
+          {children}
+        </Animated.View>
       </Pressable>
     );
   }
@@ -231,6 +248,26 @@ export function EmptyState({
   );
 }
 
+/** مقبض الشيت السفلي — لمسة عصرية موحدة للنوافذ المنبثقة */
+export function SheetHandle() {
+  return <View style={styles.sheetHandle} />;
+}
+
+/** شاشة صلاحية مفقودة للمدرس (تُعرض بدل القسم المحجوب) */
+export function NoAccess({ message }: { message?: string }) {
+  return (
+    <View style={styles.empty}>
+      <View style={styles.emptyIconWrap}>
+        <Ionicons name="lock-closed" size={38} color={colors.textMuted} />
+      </View>
+      <Text style={styles.emptyTitle}>غير مصرح لك بهذا القسم</Text>
+      <Text style={styles.emptyMsg}>
+        {message ?? 'مسئول السنتر لم يفعّل لك هذه الصلاحية بعد — تواصل معه لتفعيلها.'}
+      </Text>
+    </View>
+  );
+}
+
 export function LoadingView({ message }: { message?: string }) {
   return (
     <View style={styles.loading}>
@@ -241,6 +278,10 @@ export function LoadingView({ message }: { message?: string }) {
 }
 
 const styles = StyleSheet.create({
+  sheetHandle: {
+    width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong,
+    alignSelf: 'center', marginBottom: spacing.md,
+  },
   btnBase: { borderRadius: radius.lg, overflow: 'hidden' },
   btnGradient: { borderRadius: radius.lg },
   btnInner: {

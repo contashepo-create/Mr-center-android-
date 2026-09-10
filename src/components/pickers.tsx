@@ -3,10 +3,82 @@
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import React, { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors, font, radius, spacing } from '../theme';
-import { arabicDay, WEEK_DAYS } from '../lib/utils';
+import { arabicDay, formatTimeAr, minutesToTime24, timeToMinutes, WEEK_DAYS } from '../lib/utils';
+
+const HOUR_OPTIONS = Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }));
+const MINUTE_OPTIONS = Array.from({ length: 12 }, (_, i) => {
+  const v = String(i * 5).padStart(2, '0');
+  return { value: v, label: v };
+});
+const PERIOD_OPTIONS = [
+  { value: 'am', label: 'صباحاً (ص)' },
+  { value: 'pm', label: 'مساءً (م)' },
+];
+
+/** منتقي وقت بالأرقام (ساعة + دقيقة + ص/م) — يُخزن "HH:MM" */
+export function TimePicker({
+  label, value, onChange, icon = 'time',
+}: {
+  label?: string;
+  value: string;
+  onChange: (value: string) => void;
+  icon?: keyof typeof Ionicons.glyphMap;
+}) {
+  const minutes = timeToMinutes(value);
+  const h24 = minutes === null ? null : Math.floor(minutes / 60) % 24;
+  const hour12 = h24 === null ? null : (h24 % 12 === 0 ? 12 : h24 % 12);
+  const minute = minutes === null ? null : String(minutes % 60).padStart(2, '0');
+  const period = h24 === null ? null : h24 < 12 ? 'am' : 'pm';
+
+  const pick = (h: number | null, mi: number | null, p: 'am' | 'pm' | null) => {
+    const hh = h ?? hour12 ?? 12;
+    const mm = mi ?? (minute === null ? 0 : Number(minute));
+    const pp = p ?? period ?? 'pm';
+    let h24v = hh % 12;
+    if (pp === 'pm') h24v += 12;
+    onChange(minutesToTime24(h24v * 60 + mm));
+  };
+
+  return (
+    <View style={{ marginBottom: spacing.md }}>
+      <View style={styles.timeHead}>
+        {label ? <Text style={styles.label}>{label}</Text> : null}
+        {minutes !== null ? <Text style={styles.timePreview}>{formatTimeAr(value)}</Text> : null}
+      </View>
+      <View style={styles.timeRow}>
+        <View style={{ flex: 1.2 }}>
+          <OptionPicker
+            icon={icon}
+            value={hour12 === null ? null : String(hour12)}
+            options={HOUR_OPTIONS}
+            onChange={(v) => pick(Number(v), null, null)}
+            placeholder="الساعة"
+          />
+        </View>
+        <View style={{ flex: 1.2 }}>
+          <OptionPicker
+            value={minute}
+            options={MINUTE_OPTIONS}
+            onChange={(v) => pick(null, Number(v), null)}
+            placeholder="الدقيقة"
+          />
+        </View>
+        <View style={{ flex: 1.4 }}>
+          <OptionPicker
+            value={period}
+            options={PERIOD_OPTIONS}
+            onChange={(v) => pick(null, null, v as 'am' | 'pm')}
+            placeholder="ص/م"
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
 
 export interface Option {
   value: string;
@@ -40,7 +112,7 @@ export function OptionPicker({
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation?.()}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>{label ?? 'اختر'}</Text>
             <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
@@ -99,21 +171,42 @@ export function DaysPicker({
   );
 }
 
-/** رسالة نجاح/خطأ داخل النماذج */
+/** رسالة نجاح/خطأ داخل النماذج — الخطأ معه زر نسخ لإرساله للدعم */
 export function FormMessage({ type, text }: { type: 'error' | 'success' | 'info'; text: string | null }) {
+  const [copied, setCopied] = useState(false);
   if (!text) return null;
   const color = type === 'error' ? colors.danger : type === 'success' ? colors.success : colors.info;
   const bg = type === 'error' ? colors.dangerBg : type === 'success' ? colors.successBg : colors.infoBg;
   const icon = type === 'error' ? 'alert-circle' : type === 'success' ? 'checkmark-circle' : 'information-circle';
+  const copy = async () => {
+    try {
+      await Clipboard.setStringAsync(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* تجاهل */ }
+  };
   return (
     <View style={[styles.msg, { backgroundColor: bg, borderColor: color + '55' }]}>
       <Ionicons name={icon} size={18} color={color} />
-      <Text style={[styles.msgText, { color }]}>{text}</Text>
+      <Text style={[styles.msgText, { color }]} selectable>{text}</Text>
+      {type === 'error' ? (
+        <Pressable hitSlop={8} onPress={copy} style={styles.copyBtn}>
+          <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={16} color={color} />
+          {copied ? <Text style={[styles.copyText, { color }]}>اتنسخ</Text> : null}
+        </Pressable>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  timeHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  timePreview: {
+    color: colors.cyan, fontSize: font.sm, fontWeight: '800',
+    backgroundColor: colors.cyan + '1f', borderRadius: radius.full,
+    paddingHorizontal: spacing.md, paddingVertical: 4, marginBottom: spacing.xs + 2,
+  },
+  timeRow: { flexDirection: 'row', gap: spacing.sm },
   label: {
     color: colors.textSecondary, fontSize: font.sm, fontWeight: '700',
     marginBottom: spacing.xs + 2, textAlign: 'right',
@@ -159,4 +252,10 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md,
   },
   msgText: { flex: 1, fontSize: font.sm, fontWeight: '600', textAlign: 'right', lineHeight: 20 },
+  copyBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 2,
+    paddingHorizontal: spacing.sm, paddingVertical: 4,
+    borderRadius: radius.full, backgroundColor: 'rgba(0,0,0,0.15)',
+  },
+  copyText: { fontSize: font.xs, fontWeight: '800' },
 });

@@ -6,10 +6,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Alert, FlatList, Modal, Pressable, StyleSheet, Text, View,
+  Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import {
-  AppButton, AppInput, Card, EmptyState, ListItem, LoadingView,
+  AppButton, AppInput, Card, EmptyState, LoadingView, SheetHandle,
 } from '../../src/components/controls';
 import { GradientScreen, ScreenHeader } from '../../src/components/layout';
 import { FormMessage, OptionPicker } from '../../src/components/pickers';
@@ -18,7 +18,8 @@ import {
 } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import type { Grade, Group, Student } from '../../src/lib/types';
-import { arabicError } from '../../src/lib/utils';
+import { isOwner } from '../../src/lib/staff';
+import { arabicError, isValidPhone, normalizePhone } from '../../src/lib/utils';
 import { colors, font, radius, spacing } from '../../src/theme';
 
 export default function StudentsScreen() {
@@ -29,7 +30,10 @@ export default function StudentsScreen() {
   const [students, setStudents] = useState<Student[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const [filterGroup, setFilterGroup] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<'active' | 'suspended' | 'archived' | 'all'>('active');
   const [loading, setLoading] = useState(true);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -39,14 +43,27 @@ export default function StudentsScreen() {
   const [guardianPhone, setGuardianPhone] = useState('');
   const [gradeId, setGradeId] = useState<string | null>(null);
   const [groupId, setGroupId] = useState<string | null>(null);
+  const [status, setStatus] = useState<'active' | 'suspended' | 'archived'>('active');
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // تنظيف القائمة عند تغيّر السنتر حتى لا تعرض بيانات سنتر سابق
+  useEffect(() => {
+    setStudents([]);
+    setGroups([]);
+    setGrades([]);
+    setFilterGroup('all');
+    setLoading(true);
+  }, [centerId]);
+
   const load = useCallback(async () => {
-    if (!centerId) return;
+    if (!centerId) {
+      setLoading(false);
+      return;
+    }
     try {
       const [s, g, gr] = await Promise.all([
-        fetchStudents(centerId, search),
+        fetchStudents(centerId, search, true),
         fetchGroups(centerId),
         fetchGrades(centerId),
       ]);
@@ -62,6 +79,12 @@ export default function StudentsScreen() {
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
+  // تأخير البحث 400ms حتى لا نضرب الخادم مع كل حرف
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
   // فتح نموذج الإضافة تلقائياً عند القدوم من زر سريع
   useEffect(() => {
     if (params.add === '1') {
@@ -72,11 +95,20 @@ export default function StudentsScreen() {
   }, [params.add]);
 
   const groupName = (id: string | null) => groups.find((g) => g.id === id)?.name ?? 'بدون مجموعة';
+  const gradeName = (id: string | null) => grades.find((g) => g.id === id)?.name ?? '';
+  // المدرس: عرض وفتح ملفات فقط — الإضافة والتعديل والحذف للمالك
+  const canManage = isOwner(profile);
+
+  const displayed = students.filter((s) => {
+    if (filterStatus !== 'all' && s.status !== filterStatus) return false;
+    if (filterGroup !== 'all' && s.group_id !== filterGroup) return false;
+    return true;
+  });
 
   const openAdd = () => {
     setEditing(null);
     setName(''); setPhone(''); setGuardianPhone('');
-    setGradeId(null); setGroupId(null); setFormError(null);
+    setGradeId(null); setGroupId(null); setStatus('active'); setFormError(null);
     setFormOpen(true);
   };
 
@@ -87,6 +119,7 @@ export default function StudentsScreen() {
     setGuardianPhone(s.guardian_phone ?? '');
     setGradeId(s.grade_id);
     setGroupId(s.group_id);
+    setStatus(s.status ?? 'active');
     setFormError(null);
     setFormOpen(true);
   };
@@ -94,13 +127,17 @@ export default function StudentsScreen() {
   const save = async () => {
     setFormError(null);
     if (!name.trim()) return setFormError('أدخل اسم الطالب');
+    if (!isValidPhone(guardianPhone)) return setFormError('رقم هاتف ولي الأمر إجباري — أدخله بشكل صحيح');
+    if (phone.trim() && normalizePhone(phone) === normalizePhone(guardianPhone)) {
+      return setFormError('رقم ولي الأمر يجب أن يختلف عن رقم الطالب');
+    }
     setBusy(true);
     try {
       await upsertStudent(centerId, {
         id: editing?.id,
         name, phone, guardian_phone: guardianPhone,
         grade_id: gradeId, group_id: groupId,
-        status: editing?.status ?? 'active',
+        status,
       });
       setFormOpen(false);
       await load();
@@ -128,11 +165,13 @@ export default function StudentsScreen() {
     <GradientScreen>
       <ScreenHeader
         title="الطلاب"
-        subtitle={`${students.length} طالب`}
+        subtitle={`${displayed.length} طالب`}
         right={
+          canManage ? (
           <Pressable style={styles.addBtn} onPress={openAdd}>
-            <Ionicons name="add" size={24} color="#fff" />
+            <Ionicons name="add" size={24} color="#052E22" />
           </Pressable>
+          ) : undefined
         }
       />
 
@@ -140,50 +179,82 @@ export default function StudentsScreen() {
       <View style={{ paddingHorizontal: spacing.lg }}>
         <View style={styles.searchWrap}>
           <Ionicons name="search" size={18} color={colors.textMuted} style={{ marginHorizontal: spacing.sm }} />
-          <AppInput
+          <TextInput
             placeholder="ابحث بالاسم أو الهاتف أو البريد..."
-            value={search}
-            onChangeText={setSearch}
+            placeholderTextColor={colors.textMuted}
+            value={searchInput}
+            onChangeText={setSearchInput}
             style={styles.searchInput}
+            textAlign="right"
+            returnKeyType="search"
           />
+          {searchInput ? (
+            <Pressable hitSlop={8} onPress={() => setSearchInput('')} style={{ marginHorizontal: spacing.sm }}>
+              <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+            </Pressable>
+          ) : null}
         </View>
+      </View>
+
+      {/* فلتر الحالة */}
+      <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.sm }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
+          {([
+            { v: 'active', label: `نشط (${students.filter((s) => s.status === 'active').length})` },
+            { v: 'suspended', label: `موقوف (${students.filter((s) => s.status === 'suspended').length})` },
+            { v: 'archived', label: `مؤرشف (${students.filter((s) => s.status === 'archived').length})` },
+            { v: 'all', label: `الكل (${students.length})` },
+          ] as const).map((f) => (
+            <FilterChip key={f.v} label={f.label} active={filterStatus === f.v} onPress={() => setFilterStatus(f.v)} />
+          ))}
+        </ScrollView>
+      </View>
+
+      {/* فلتر المجموعات */}
+      <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.md }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
+          <FilterChip
+            label={`الكل (${students.length})`}
+            active={filterGroup === 'all'}
+            onPress={() => setFilterGroup('all')}
+          />
+          {groups.map((g) => (
+            <FilterChip
+              key={g.id}
+              label={`${g.name} (${students.filter((s) => s.group_id === g.id).length})`}
+              active={filterGroup === g.id}
+              onPress={() => setFilterGroup(filterGroup === g.id ? 'all' : g.id)}
+            />
+          ))}
+        </ScrollView>
       </View>
 
       {loading ? (
         <LoadingView message="جاري تحميل الطلاب..." />
-      ) : students.length === 0 ? (
+      ) : displayed.length === 0 ? (
         <EmptyState
           icon="people-outline"
-          title={search ? 'لا توجد نتائج مطابقة' : 'لا يوجد طلاب بعد'}
-          message={search ? 'جرّب كلمات بحث مختلفة' : 'أضف طلابك يدوياً، أو شارك كود السنتر ليسجّلوا بأنفسهم'}
+          title={search || filterGroup !== 'all' ? 'لا توجد نتائج مطابقة' : 'لا يوجد طلاب بعد'}
+          message={search || filterGroup !== 'all' ? 'جرّب بحثاً مختلفاً أو غيّر فلتر المجموعة' : 'أضف طلابك يدوياً، أو شارك كود السنتر ليسجّلوا بأنفسهم'}
           action={<AppButton title="إضافة طالب" icon="person-add" small onPress={openAdd} />}
         />
       ) : (
         <FlatList
-          data={students}
+          data={displayed}
           keyExtractor={(s) => s.id}
           contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: 100 }}
           showsVerticalScrollIndicator={false}
           refreshing={loading}
           onRefresh={() => { setLoading(true); void load(); }}
           renderItem={({ item }) => (
-            <ListItem
-              title={item.name}
-              subtitle={`${groupName(item.group_id)}${item.phone ? ` · ${item.phone}` : ''}`}
-              icon="person"
-              iconColor={item.status === 'active' ? colors.info : colors.textMuted}
-              badge={item.status !== 'active' ? { text: 'موقوف', color: colors.danger, bg: colors.dangerBg } : undefined}
-              onPress={() => router.push(`/student/${item.id}`)}
-              right={
-                <View style={{ flexDirection: 'row', gap: spacing.xs }}>
-                  <Pressable hitSlop={8} onPress={() => openEdit(item)} style={styles.miniBtn}>
-                    <Ionicons name="create" size={16} color={colors.cyan} />
-                  </Pressable>
-                  <Pressable hitSlop={8} onPress={() => confirmDelete(item)} style={styles.miniBtn}>
-                    <Ionicons name="trash" size={16} color={colors.danger} />
-                  </Pressable>
-                </View>
-              }
+            <StudentCard
+              student={item}
+              groupLabel={groupName(item.group_id)}
+              gradeLabel={gradeName(item.grade_id)}
+              canManage={canManage}
+              onOpen={() => router.push(`/student/${item.id}`)}
+              onEdit={() => openEdit(item)}
+              onDelete={() => confirmDelete(item)}
             />
           )}
         />
@@ -193,10 +264,12 @@ export default function StudentsScreen() {
       <Modal visible={formOpen} transparent animationType="slide" onRequestClose={() => setFormOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
+            <SheetHandle />
             <Text style={styles.modalTitle}>{editing ? 'تعديل بيانات الطالب' : 'إضافة طالب جديد'}</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
             <AppInput label="اسم الطالب" icon="person" placeholder="الاسم الكامل" value={name} onChangeText={setName} />
             <AppInput label="رقم الهاتف (اختياري)" icon="call" placeholder="01xxxxxxxxx" value={phone} onChangeText={setPhone} keyboardType="phone-pad" textAlign="left" style={{ writingDirection: 'ltr' }} />
-            <AppInput label="رقم ولي الأمر (اختياري)" icon="people" placeholder="01xxxxxxxxx" value={guardianPhone} onChangeText={setGuardianPhone} keyboardType="phone-pad" textAlign="left" style={{ writingDirection: 'ltr' }} />
+            <AppInput label="رقم ولي الأمر (إجباري)" icon="people" placeholder="01xxxxxxxxx" value={guardianPhone} onChangeText={setGuardianPhone} keyboardType="phone-pad" textAlign="left" style={{ writingDirection: 'ltr' }} />
             <OptionPicker
               label="الصف الدراسي"
               icon="school"
@@ -217,14 +290,87 @@ export default function StudentsScreen() {
               onChange={setGroupId}
               placeholder="اختر المجموعة..."
             />
+            <OptionPicker
+              label="حالة الطالب"
+              icon="flag"
+              value={status}
+              options={[
+                { value: 'active', label: 'نشط' },
+                { value: 'suspended', label: 'موقوف (لا يظهر في الحضور)' },
+                { value: 'archived', label: 'مؤرشف (خارج القائمة)' },
+              ]}
+              onChange={(v) => setStatus(v as 'active' | 'suspended' | 'archived')}
+            />
             <FormMessage type="error" text={formError} />
             <AppButton title={editing ? 'حفظ التعديلات' : 'إضافة الطالب'} icon="checkmark" onPress={save} loading={busy} />
             <View style={{ height: spacing.sm }} />
             <AppButton title="إلغاء" variant="ghost" small onPress={() => setFormOpen(false)} />
+            <View style={{ height: spacing.xl }} />
+            </ScrollView>
           </View>
         </View>
       </Modal>
     </GradientScreen>
+  );
+}
+
+/** شريحة فلتر مجموعة */
+function FilterChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={[styles.chip, active && styles.chipActive]}>
+      <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * بطاقة طالب: منطقة الفتح منفصلة تماماً عن أزرار التعديل/الحذف
+ * حتى لا يفتح ملف الطالب خطأً عند الضغط على زر.
+ */
+function StudentCard({ student, groupLabel, gradeLabel, canManage, onOpen, onEdit, onDelete }: {
+  student: Student; groupLabel: string; gradeLabel: string; canManage: boolean;
+  onOpen: () => void; onEdit: () => void; onDelete: () => void;
+}) {
+  const suspended = student.status !== 'active';
+  return (
+    <Card style={styles.studentCard}>
+      <Pressable onPress={onOpen} style={styles.studentMain}>
+        <View style={[styles.studentIcon, suspended && { opacity: 0.5 }]}>
+          <Ionicons name="person" size={20} color={suspended ? colors.textMuted : colors.info} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <View style={styles.studentTitleRow}>
+            <Text style={styles.studentName} numberOfLines={1}>{student.name}</Text>
+            {student.status === 'suspended' ? (
+              <View style={styles.suspendedPill}>
+                <Text style={styles.suspendedText}>موقوف</Text>
+              </View>
+            ) : student.status === 'archived' ? (
+              <View style={[styles.suspendedPill, { backgroundColor: colors.textMuted + '22' }]}>
+                <Text style={[styles.suspendedText, { color: colors.textMuted }]}>مؤرشف</Text>
+              </View>
+            ) : null}
+          </View>
+          <Text style={styles.studentMeta} numberOfLines={1}>
+            {groupLabel}{gradeLabel ? ` · ${gradeLabel}` : ''}
+          </Text>
+          {student.phone ? <Text style={styles.studentPhone}>{student.phone}</Text> : null}
+        </View>
+        <Ionicons name="chevron-back" size={18} color={colors.textMuted} />
+      </Pressable>
+      {canManage ? (
+        <View style={styles.studentActions}>
+          <Pressable hitSlop={8} onPress={onEdit} style={styles.actionBtn}>
+            <Ionicons name="create" size={15} color={colors.cyan} />
+            <Text style={[styles.actionText, { color: colors.cyan }]}>تعديل</Text>
+          </Pressable>
+          <Pressable hitSlop={8} onPress={onDelete} style={styles.actionBtn}>
+            <Ionicons name="trash" size={15} color={colors.danger} />
+            <Text style={[styles.actionText, { color: colors.danger }]}>حذف</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </Card>
   );
 }
 
@@ -238,11 +384,44 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
     borderRadius: radius.md, marginBottom: spacing.md, minHeight: 48,
   },
-  searchInput: { flex: 1, paddingVertical: spacing.sm },
-  miniBtn: {
-    width: 32, height: 32, borderRadius: radius.sm,
-    backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center',
+  searchInput: {
+    flex: 1, color: colors.text, fontSize: font.md,
+    paddingVertical: spacing.sm, textAlign: 'right',
   },
+  chip: {
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderRadius: radius.full, backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.border, maxWidth: 220,
+  },
+  chipActive: { backgroundColor: colors.primary + '33', borderColor: colors.primary },
+  chipText: { color: colors.textSecondary, fontSize: font.sm, fontWeight: '700' },
+  chipTextActive: { color: colors.text },
+  studentCard: { marginBottom: spacing.sm, padding: spacing.md },
+  studentMain: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  studentIcon: {
+    width: 44, height: 44, borderRadius: radius.md,
+    backgroundColor: colors.info + '1f', borderWidth: 1, borderColor: colors.info + '4d',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  studentTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  studentName: { color: colors.text, fontSize: font.md, fontWeight: '800', flexShrink: 1, textAlign: 'right' },
+  suspendedPill: {
+    backgroundColor: colors.dangerBg, borderRadius: radius.full,
+    paddingHorizontal: spacing.sm, paddingVertical: 2,
+  },
+  suspendedText: { color: colors.danger, fontSize: font.xs, fontWeight: '800' },
+  studentMeta: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: 2 },
+  studentPhone: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
+  studentActions: {
+    flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md,
+    borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md,
+  },
+  actionBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: spacing.xs, backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md, paddingVertical: spacing.sm,
+  },
+  actionText: { fontSize: font.sm, fontWeight: '800' },
   modalBackdrop: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end',
   },

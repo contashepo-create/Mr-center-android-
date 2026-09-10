@@ -3,16 +3,21 @@
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { Alert, FlatList, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { AppButton, EmptyState, ListItem, LoadingView } from '../../src/components/controls';
+import { DeveloperGate } from '../../src/components/DeveloperGate';
 import { BackHeader, GradientScreen } from '../../src/components/layout';
-import { devFetchCenters, devSetCenterStatus, type CenterWithSub } from '../../src/lib/api';
+import { devFetchCenters, devSetCenterStatus, logActivity, type CenterWithSub } from '../../src/lib/api';
+import { useSession } from '../../src/lib/session';
 import { arabicError, formatDate } from '../../src/lib/utils';
+import { planLabel } from '../../src/lib/billing';
+import { openWhatsApp } from '../../src/lib/whatsapp';
 import { colors, spacing } from '../../src/theme';
 
 export default function DevCentersScreen() {
+  const { profile, ready } = useSession();
   const [centers, setCenters] = useState<CenterWithSub[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -22,6 +27,15 @@ export default function DevCentersScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+
+  if (!ready) {
+    return (
+      <GradientScreen>
+        <LoadingView message="..." />
+      </GradientScreen>
+    );
+  }
+  if (profile?.role !== 'super_admin') return <DeveloperGate />;
 
   const toggleStatus = (c: CenterWithSub) => {
     const suspending = c.status === 'active';
@@ -36,13 +50,14 @@ export default function DevCentersScreen() {
           text: suspending ? 'إيقاف' : 'تفعيل',
           style: suspending ? 'destructive' : 'default',
           onPress: async () => {
-            try {
-              await devSetCenterStatus(c.id, suspending ? 'suspended' : 'active');
-              await load();
-            } catch (e) {
-              Alert.alert('خطأ', arabicError(e));
-            }
-          },
+              try {
+                await devSetCenterStatus(c.id, suspending ? 'suspended' : 'active');
+                await logActivity(c.id, suspending ? 'center_suspended' : 'subscription_activated', suspending ? 'إيقاف من إدارة السناتر' : 'تفعيل من إدارة السناتر');
+                await load();
+              } catch (e) {
+                Alert.alert('خطأ', arabicError(e));
+              }
+            },
         },
       ],
     );
@@ -71,13 +86,14 @@ export default function DevCentersScreen() {
             const active = item.status === 'active';
             return (
               <ListItem
+                onPress={() => router.push(`/developer/center-detail?id=${item.id}`)}
                 title={item.name}
                 subtitle={[
                   `الكود: ${item.code}`,
                   `المسئول: ${item.owner_name || '—'}${item.owner_email ? ' · ' + item.owner_email : ''}`,
                   `${item.students_count ?? 0} طالب · سُجل ${formatDate(item.created_at)}`,
                   item.latest_sub
-                    ? `الاشتراك: ${item.latest_sub.plan_type === 'monthly' ? 'شهري' : item.latest_sub.plan_type === 'yearly' ? 'سنوي' : 'مخصص'} حتى ${item.latest_sub.ends_on}`
+                    ? `الاشتراك: ${planLabel(item.latest_sub.plan_type)} حتى ${formatDate(item.latest_sub.ends_on)}`
                     : 'الاشتراك: لا يوجد سجل',
                 ].join('\n')}
                 icon="business"
@@ -88,13 +104,30 @@ export default function DevCentersScreen() {
                   bg: active ? colors.successBg : colors.dangerBg,
                 }}
                 right={
-                  <AppButton
-                    title={active ? 'إيقاف' : 'تفعيل'}
-                    icon={active ? 'pause' : 'play'}
-                    small
-                    variant={active ? 'danger' : 'success'}
-                    onPress={() => toggleStatus(item)}
-                  />
+                  <View style={{ flexDirection: 'row', gap: spacing.xs, alignItems: 'center' }}>
+                    {item.owner_phone ? (
+                      <Pressable
+                        hitSlop={8}
+                        onPress={async () => {
+                          const ok = await openWhatsApp(
+                            item.owner_phone,
+                            `مرحباً ${item.owner_name || ''} (سنتر ${item.name}) — معك إدارة تطبيق Mr Center.`,
+                          );
+                          if (!ok) Alert.alert('تعذر الفتح', 'رقم الهاتف غير صالح أو واتساب غير مثبت');
+                        }}
+                        style={styles.waBtn}
+                      >
+                        <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+                      </Pressable>
+                    ) : null}
+                    <AppButton
+                      title={active ? 'إيقاف' : 'تفعيل'}
+                      icon={active ? 'pause' : 'play'}
+                      small
+                      variant={active ? 'danger' : 'success'}
+                      onPress={() => toggleStatus(item)}
+                    />
+                  </View>
                 }
               />
             );
@@ -104,3 +137,11 @@ export default function DevCentersScreen() {
     </GradientScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  waBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#25D36622', borderWidth: 1, borderColor: '#25D36655',
+    alignItems: 'center', justifyContent: 'center',
+  },
+});

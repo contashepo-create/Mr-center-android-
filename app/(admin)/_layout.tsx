@@ -8,6 +8,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { LoadingView } from '../../src/components/controls';
 import { useSession } from '../../src/lib/session';
+import { can, isOwner, isStaff, TEACHER_TABS } from '../../src/lib/staff';
 import { colors, font, radius, spacing } from '../../src/theme';
 
 function SubscriptionBanner() {
@@ -31,13 +32,19 @@ export default function AdminTabsLayout() {
   if (!ready || !profile) {
     return <LoadingView message="جاري تحميل حسابك..." />;
   }
-  if (profile.role !== 'center_admin') {
+  if (!isOwner(profile) && !isStaff(profile)) {
     return <LoadingView message="جاري التوجيه..." />;
   }
+  // تبويبات المدرس تُخفى حسب صلاحياته (الشاشات تحمي نفسها أيضاً)
+  const tabVisible = (route: string) => {
+    const t = TEACHER_TABS.find((x) => x.route === route);
+    if (!t) return true;
+    return t.perm === null || can(profile, t.perm);
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <SubscriptionBanner />
+      {isOwner(profile) ? <SubscriptionBanner /> : null}
       <Tabs
         screenOptions={{
           headerShown: false,
@@ -73,6 +80,7 @@ export default function AdminTabsLayout() {
           options={{
             title: 'الحضور',
             tabBarIcon: ({ color, size }) => <Ionicons name="checkmark-done" size={size} color={color} />,
+            ...(tabVisible('attendance') ? {} : { href: null }),
           }}
         />
         <Tabs.Screen
@@ -88,6 +96,20 @@ export default function AdminTabsLayout() {
         <Tabs.Screen name="grades-list" options={{ href: null }} />
         <Tabs.Screen name="admin-settings" options={{ href: null }} />
         <Tabs.Screen name="student/[id]" options={{ href: null }} />
+        <Tabs.Screen name="scan" options={{ href: null }} />
+        <Tabs.Screen name="teachers" options={{ href: null }} />
+        <Tabs.Screen name="subscription" options={{ href: null }} />
+        <Tabs.Screen name="activity" options={{ href: null }} />
+        <Tabs.Screen name="exams" options={{ href: null }} />
+        <Tabs.Screen name="inquiries" options={{ href: null }} />
+        <Tabs.Screen name="surveys" options={{ href: null }} />
+        <Tabs.Screen name="library" options={{ href: null }} />
+        <Tabs.Screen name="schedule" options={{ href: null }} />
+        <Tabs.Screen name="reports" options={{ href: null }} />
+        <Tabs.Screen name="guide" options={{ href: null }} />
+        <Tabs.Screen name="whatsapp" options={{ href: null }} />
+        <Tabs.Screen name="notifications" options={{ href: null }} />
+        <Tabs.Screen name="dev-notices" options={{ href: null }} />
       </Tabs>
     </View>
   );
@@ -101,6 +123,8 @@ const styles = StyleSheet.create({
     height: 62,
     paddingBottom: 8,
     paddingTop: 6,
+    // العربية: الرئيسية يميناً دائماً مهما كانت لغة الجهاز
+    direction: 'rtl',
   },
   tabLabel: { fontSize: 11, fontWeight: '700' },
   banner: {

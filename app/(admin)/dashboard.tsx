@@ -13,6 +13,7 @@ import {
   fetchAdminStats, fetchAnnouncements, fetchMyCenter, type AdminStats,
 } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
+import { can, isOwner } from '../../src/lib/staff';
 import type { Announcement, Center } from '../../src/lib/types';
 import { formatMoney } from '../../src/lib/utils';
 import { colors, font, gradients, radius, spacing } from '../../src/theme';
@@ -24,6 +25,7 @@ export default function AdminDashboard() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const isTeacher = !isOwner(profile);
   const load = useCallback(async () => {
     if (!profile?.center_id) return;
     try {
@@ -58,18 +60,18 @@ export default function AdminDashboard() {
           style={styles.heroCard}
         >
           <View style={{ flex: 1 }}>
-            <Text style={styles.hello}>مرحباً 👋</Text>
+            <Text style={styles.hello}>مرحباً بك في لوحة السنتر</Text>
             <Text style={styles.centerName} numberOfLines={1}>{center?.name ?? 'سنترك'}</Text>
             <View style={styles.codePill}>
-              <Ionicons name="key" size={13} color="#fff" />
+              <Ionicons name="key" size={13} color="#052E22" />
               <Text style={styles.codePillText}>كود السنتر: {center?.code ?? '—'}</Text>
             </View>
           </View>
-          <Ionicons name="school" size={58} color="rgba(255,255,255,0.35)" />
+          <Ionicons name="school" size={58} color="rgba(4,46,34,0.3)" />
         </LinearGradient>
 
-        {/* حالة الاشتراك */}
-        {subscription ? (
+        {/* حالة الاشتراك — للمالك فقط */}
+        {!isTeacher && subscription ? (
           <Card style={styles.subCard} onPress={() => router.push('/admin-settings')}>
             <View style={styles.subRow}>
               <Ionicons
@@ -79,9 +81,9 @@ export default function AdminDashboard() {
               />
               <Text style={styles.subText}>
                 الاشتراك: {subscription.status === 'active' ? 'فعّال' : subscription.status === 'suspended' ? 'موقوف' : 'منتهي'}
-                {subscription.days_left !== null && subscription.days_left !== undefined
+                {subscription.days_left !== null && subscription.days_left !== undefined && subscription.days_left > 0
                   ? ` — متبقي ${subscription.days_left} يوم`
-                  : ''}
+                  : subscription.status === 'active' ? ' — تنتهي اليوم' : ''}
               </Text>
               <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
             </View>
@@ -106,13 +108,27 @@ export default function AdminDashboard() {
           <StatCard icon="cash" value={formatMoney(stats?.paidThisMonth ?? 0)} label="مدفوع هذا الشهر" color={colors.cyan} onPress={() => router.push('/payments')} />
         </View>
 
-        {/* إجراءات سريعة */}
+        {/* إجراءات سريعة (حسب الصلاحية — بلا إضافة طلاب للمدرس) */}
         <SectionTitle title="إجراءات سريعة" />
         <View style={styles.actionsRow}>
-          <QuickAction icon="person-add" label="طالب جديد" color={colors.info} onPress={() => router.push('/students?add=1')} />
-          <QuickAction icon="checkmark-done-circle" label="تسجيل حضور" color={colors.success} onPress={() => router.push('/attendance')} />
-          <QuickAction icon="megaphone" label="إعلان جديد" color={colors.warning} onPress={() => router.push('/announcements')} />
-          <QuickAction icon="wallet" label="المدفوعات" color={colors.cyan} onPress={() => router.push('/payments')} />
+          {can(profile, 'attendance') ? (
+            <QuickAction icon="qr-code" label="مسح باركود" color={colors.primary} onPress={() => router.push('/scan')} />
+          ) : null}
+          {!isTeacher ? (
+            <QuickAction icon="person-add" label="طالب جديد" color={colors.info} onPress={() => router.push('/students?add=1')} />
+          ) : null}
+          {can(profile, 'attendance') ? (
+            <QuickAction icon="checkmark-done-circle" label="تسجيل حضور" color={colors.success} onPress={() => router.push('/attendance')} />
+          ) : null}
+          {can(profile, 'announcements') ? (
+            <QuickAction icon="megaphone" label="إعلان جديد" color={colors.warning} onPress={() => router.push('/announcements')} />
+          ) : null}
+        </View>
+        <View style={[styles.actionsRow, { marginTop: spacing.sm }]}>
+          {can(profile, 'collect') ? (
+            <QuickAction icon="wallet" label="المدفوعات" color={colors.cyan} onPress={() => router.push('/payments')} />
+          ) : null}
+          <QuickAction icon="albums" label="المجموعات" color={colors.warning} onPress={() => router.push('/groups')} />
         </View>
 
         {/* آخر الإعلانات */}
@@ -163,15 +179,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     marginTop: spacing.md,
   },
-  hello: { color: 'rgba(255,255,255,0.85)', fontSize: font.md, fontWeight: '600' },
-  centerName: { color: '#fff', fontSize: font.xxl, fontWeight: '900', marginTop: 2 },
+  hello: { color: 'rgba(4,46,34,0.75)', fontSize: font.md, fontWeight: '600' },
+  centerName: { color: '#052E22', fontSize: font.xxl, fontWeight: '900', marginTop: 2 },
   codePill: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: radius.full,
     paddingHorizontal: spacing.md, paddingVertical: 5, marginTop: spacing.md,
     alignSelf: 'flex-start',
   },
-  codePillText: { color: '#fff', fontSize: font.sm, fontWeight: '800', letterSpacing: 1 },
+  codePillText: { color: '#052E22', fontSize: font.sm, fontWeight: '800', letterSpacing: 1 },
   subCard: { marginTop: spacing.md, paddingVertical: spacing.md },
   subRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   subText: { flex: 1, color: colors.text, fontSize: font.sm, fontWeight: '700', textAlign: 'right' },

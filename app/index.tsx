@@ -6,7 +6,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useRef } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppButton } from '../src/components/controls';
 import { GradientScreen, KeyboardScreen } from '../src/components/layout';
@@ -16,7 +16,19 @@ import { colors, font, gradients, radius, shadow, spacing } from '../src/theme';
 
 export default function WelcomeScreen() {
   const { ready, configured, session, profile } = useSession();
-  const [gateHint, setGateHint] = useState(false);
+  // بديل عملي مخفي: 5 ضغطات متتالية على سطر الفوتر خلال ثانيتين تفتح بوابة المطور
+  const tapsRef = useRef<number[]>([]);
+  const openDeveloper = () => {
+    router.push('/developer');
+  };
+  const onSecretTap = () => {
+    const now = Date.now();
+    tapsRef.current = [...tapsRef.current.filter((t) => now - t < 2000), now];
+    if (tapsRef.current.length >= 5) {
+      tapsRef.current = [];
+      openDeveloper();
+    }
+  };
 
   // لو المستخدم مسجل دخوله بالفعل لا نظهر الترحيب (الحارس سيوجهه)
   if (ready && session && profile) {
@@ -44,14 +56,11 @@ export default function WelcomeScreen() {
   return (
     <GradientScreen>
       <KeyboardScreen>
-        {/* الشعار — ضغطة مطولة ٣ ثواني تفتح بوابة المطور المخفية */}
+        {/* الشعار — ضغطة مطولة ٥ ثواني تفتح بوابة المطور المخفية */}
         <View style={styles.hero}>
           <Pressable
-            onLongPress={() => {
-              setGateHint(true);
-              router.push('/developer');
-            }}
-            delayLongPress={2500}
+            onLongPress={openDeveloper}
+            delayLongPress={5000}
           >
             <View style={styles.logoGlow}>
               <LinearGradient
@@ -70,45 +79,61 @@ export default function WelcomeScreen() {
 
         <View style={styles.buttons}>
           <AppButton
-            title="إنشاء حساب سنتر جديد"
-            icon="business"
-            onPress={() => router.push('/auth/register-center')}
+            title="دخول مسئول السنتر"
+            icon="person-circle"
+            onPress={() => router.push('/auth/login-admin')}
           />
           <View style={{ height: spacing.md }} />
           <AppButton
-            title="تسجيل طالب جديد"
-            icon="school"
+            title="دخول طالب"
+            icon="person"
             variant="accent"
-            onPress={() => router.push('/auth/register-student')}
+            onPress={() => router.push('/auth/login-student')}
           />
 
           <View style={styles.dividerRow}>
             <View style={styles.divider} />
-            <Text style={styles.dividerText}>لديك حساب بالفعل؟</Text>
+            <Text style={styles.dividerText}>جديد هنا؟ أنشئ حسابك</Text>
             <View style={styles.divider} />
           </View>
 
           <View style={styles.rowButtons}>
             <View style={{ flex: 1 }}>
               <AppButton
-                title="دخول مسئول السنتر"
-                icon="person-circle"
+                title="حساب سنتر جديد"
+                icon="business"
                 variant="outline"
                 small
-                onPress={() => router.push('/auth/login-admin')}
+                onPress={() => router.push('/auth/register-center')}
               />
             </View>
             <View style={{ width: spacing.md }} />
             <View style={{ flex: 1 }}>
               <AppButton
-                title="دخول طالب"
-                icon="person"
+                title="تسجيل طالب جديد"
+                icon="school"
                 variant="outline"
                 small
-                onPress={() => router.push('/auth/login-student')}
+                onPress={() => router.push('/auth/register-student')}
               />
             </View>
           </View>
+          <View style={{ height: spacing.sm }} />
+          <AppButton
+            title="دخول فريق العمل (مدرس/مدير/سكرتير)"
+            icon="briefcase"
+            variant="outline"
+            small
+            onPress={() => router.push('/auth/login-teacher')}
+          />
+          <View style={{ height: spacing.sm }} />
+          <AppButton
+            title="انضمام لفريق سنتر"
+            icon="person-add"
+            variant="ghost"
+            small
+            onPress={() => router.push('/auth/register-teacher')}
+          />
 
           <Pressable style={styles.aboutLink} onPress={() => router.push('/about')}>
             <Ionicons name="information-circle-outline" size={18} color={colors.textSecondary} />
@@ -116,8 +141,9 @@ export default function WelcomeScreen() {
           </Pressable>
         </View>
 
-        {gateHint ? null : null}
-        <Text style={styles.footer}>نظام متعدد السناتر — كل سنتر معزول ببياناته الخاصة</Text>
+        <Pressable onPress={onSecretTap}>
+          <Text style={styles.footer}>نظام متعدد السناتر — كل سنتر معزول ببياناته الخاصة</Text>
+        </Pressable>
       </KeyboardScreen>
     </GradientScreen>
   );

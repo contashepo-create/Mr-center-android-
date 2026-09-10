@@ -65,6 +65,13 @@ export default function StudentTabsLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
         }}
       />
+      {/* شاشات داخلية مخفية من شريط التبويبات */}
+      <Tabs.Screen name="my-exams" options={{ href: null }} />
+      <Tabs.Screen name="my-inquiries" options={{ href: null }} />
+      <Tabs.Screen name="my-surveys" options={{ href: null }} />
+      <Tabs.Screen name="my-library" options={{ href: null }} />
+      <Tabs.Screen name="my-schedule" options={{ href: null }} />
+      <Tabs.Screen name="my-notifications" options={{ href: null }} />
     </Tabs>
   );
 }
@@ -77,6 +84,8 @@ const styles = StyleSheet.create({
     height: 62,
     paddingBottom: 8,
     paddingTop: 6,
+    // العربية: الرئيسية يميناً دائماً مهما كانت لغة الجهاز
+    direction: 'rtl',
   },
   tabLabel: { fontSize: 11, fontWeight: '700' },
 });

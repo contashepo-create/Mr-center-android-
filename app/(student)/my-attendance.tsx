@@ -21,7 +21,7 @@ export default function MyAttendanceScreen() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    if (!profile?.student_id) return;
+    if (!profile?.student_id) { setLoading(false); return; }
     try {
       setRows(await fetchMyAttendance(profile.student_id));
     } catch { /* ignore */ }

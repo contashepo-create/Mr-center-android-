@@ -1,21 +1,23 @@
 // ============================================================
-// نظام الألوان والتصميم الموحد للتطبيق (داكن احترافي بالدرجات)
+// هوية Mr Center البصرية: «كربون المستقبل» — داكن فحمي + نعناعي
+// كهربائي + كهرماني، بلا البنفسجي التقليدي
+// (الوضع الداكن هو الهوية المعتمدة — لا يوجد وضع فاتح)
 // ============================================================
 
 export const colors = {
-  // الخلفيات
-  bg: '#0A0E1A',
-  bgSoft: '#0E1424',
-  surface: '#131B31',
-  surfaceAlt: '#1A2440',
-  surfaceGlass: 'rgba(26, 36, 64, 0.55)',
-  border: 'rgba(148, 163, 184, 0.16)',
-  borderStrong: 'rgba(148, 163, 184, 0.30)',
+  // الخلفيات (فحمي مزرق عميق)
+  bg: '#060A12',
+  bgSoft: '#0A101D',
+  surface: '#0F1729',
+  surfaceAlt: '#16213A',
+  surfaceGlass: 'rgba(22, 33, 58, 0.55)',
+  border: 'rgba(148, 184, 190, 0.16)',
+  borderStrong: 'rgba(148, 184, 190, 0.30)',
 
-  // الألوان الأساسية (تدرج بنفسجي → نيلي → أزرق)
-  primary: '#7C3AED',
-  primaryDark: '#5B21B6',
-  indigo: '#4F46E5',
+  // الألوان الأساسية (نعناعي كهربائي → فيروزي عميق)
+  primary: '#00E5A0',
+  primaryDark: '#00A878',
+  indigo: '#0EA5A4',
   blue: '#2563EB',
   cyan: '#22D3EE',
   cyanDark: '#0891B2',
@@ -34,17 +36,17 @@ export const colors = {
   text: '#F1F5F9',
   textSecondary: '#A6B0C3',
   textMuted: '#64748B',
-  textOnPrimary: '#FFFFFF',
+  textOnPrimary: '#052E22',
 } as const;
 
 type GradientColors = readonly [string, string, ...string[]];
 
 export const gradients: Record<string, GradientColors> = {
-  primary: ['#7C3AED', '#4F46E5', '#2563EB'],
-  screen: ['#0A0E1A', '#0D1330', '#101A3E'],
-  header: ['rgba(124, 58, 237, 0.35)', 'rgba(37, 99, 235, 0.12)', 'transparent'],
-  card: ['rgba(124, 58, 237, 0.16)', 'rgba(34, 211, 238, 0.06)'],
-  accent: ['#22D3EE', '#2563EB'],
+  primary: ['#00E5A0', '#0EA5A4', '#0B3B4F'],
+  screen: ['#060A12', '#081220', '#0A1B2B'],
+  header: ['rgba(0, 229, 160, 0.22)', 'rgba(34, 211, 238, 0.10)', 'transparent'],
+  card: ['rgba(0, 229, 160, 0.12)', 'rgba(34, 211, 238, 0.05)'],
+  accent: ['#22D3EE', '#0EA5A4'],
   success: ['#059669', '#34D399'],
   danger: ['#DC2626', '#F87171'],
   gold: ['#F59E0B', '#FBBF24'],
@@ -86,9 +88,9 @@ export const shadow = {
     elevation: 6,
   },
   glow: {
-    shadowColor: '#7C3AED',
+    shadowColor: '#00E5A0',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
+    shadowOpacity: 0.35,
     shadowRadius: 18,
     elevation: 10,
   },

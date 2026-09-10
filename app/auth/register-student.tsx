@@ -3,17 +3,21 @@
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { router } from 'expo-router';
+import React, { useRef, useState } from 'react';
+import { Alert, Modal, StyleSheet, Text, View } from 'react-native';
 import { AppButton, AppInput, Card } from '../../src/components/controls';
 import { BackHeader, GradientScreen, KeyboardScreen } from '../../src/components/layout';
-import { checkAvailability, lookupCenterByCode, registerStudent } from '../../src/lib/api';
+import { checkAvailability, fetchSignupLists, lookupCenterByCode, registerStudent } from '../../src/lib/api';
+import { savePendingRegistration } from '../../src/lib/pendingRegistration';
 import { useSession } from '../../src/lib/session';
 import type { CenterLookup } from '../../src/lib/types';
 import {
-  arabicError, isValidEmail, isValidPhone, normalizeCenterCode, normalizePhone,
+  arabicError, isAllowedEmailDomain, isValidEmail, isValidPhone, normalizeCenterCode, normalizePhone,
 } from '../../src/lib/utils';
-import { FormMessage } from '../../src/components/pickers';
+import { decodeCenterQr } from '../../src/lib/qr';
+import { FormMessage, OptionPicker } from '../../src/components/pickers';
 import { colors, font, radius, spacing } from '../../src/theme';
 
 export default function RegisterStudentScreen() {
@@ -27,14 +31,21 @@ export default function RegisterStudentScreen() {
   const [phone, setPhone] = useState('');
   const [guardianPhone, setGuardianPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [grades, setGrades] = useState<{ id: string; name: string }[]>([]);
+  const [groups, setGroups] = useState<{ id: string; name: string; grade_id: string | null }[]>([]);
+  const [gradeId, setGradeId] = useState<string | null>(null);
+  const [groupId, setGroupId] = useState<string | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [permission, requestPermission] = useCameraPermissions();
+  const [scanOpen, setScanOpen] = useState(false);
+  const scanLock = useRef(false);
 
   // الخطوة ١: التحقق من كود السنتر
-  const verifyCode = async () => {
+  const verifyCode = async (override?: string) => {
     setError(null);
-    const normalized = normalizeCenterCode(code);
+    const normalized = normalizeCenterCode(override ?? code);
     if (!normalized) return setError('أدخل كود السنتر أولاً');
     setBusy(true);
     try {
@@ -43,7 +54,19 @@ export default function RegisterStudentScreen() {
         setError('كود السنتر غير صحيح — تأكد من الكود مع إدارة السنتر');
         return;
       }
+      // ملاحظة: الدالة القديمة على الخادم لا ترجع status — الغياب يُعامل كفعّال
+      if (found.status && found.status !== 'active') {
+        setError('هذا السنتر موقوف حالياً — تواصل مع إدارته أو إدارة التطبيق');
+        return;
+      }
       setCenter(found);
+      try {
+        const lists = await fetchSignupLists(found.id);
+        setGrades(lists.grades);
+        setGroups(lists.groups);
+      } catch {
+        // القوائم اختيارية — التسجيل يكمل بدونها
+      }
       setStep(2);
     } catch (e) {
       setError(arabicError(e));
@@ -57,8 +80,14 @@ export default function RegisterStudentScreen() {
     setError(null);
     if (!fullName.trim()) return setError('أدخل اسمك الكامل');
     if (!isValidEmail(email)) return setError('أدخل بريداً إلكترونياً صحيحاً');
+    if (!isAllowedEmailDomain(email)) {
+      return setError('استخدم بريداً من موفر معروف (Gmail / Yahoo / Outlook / iCloud...) — الإيميلات المؤقتة مرفوضة');
+    }
     if (!isValidPhone(phone)) return setError('أدخل رقم هاتف صحيح (8 أرقام على الأقل)');
-    if (guardianPhone.trim() && !isValidPhone(guardianPhone)) return setError('رقم ولي الأمر غير صحيح');
+    if (!isValidPhone(guardianPhone)) return setError('رقم هاتف ولي الأمر إجباري — أدخله بشكل صحيح');
+    if (normalizePhone(phone) === normalizePhone(guardianPhone)) {
+      return setError('رقم ولي الأمر يجب أن يختلف عن رقم هاتفك — لا تكتب نفس الرقم');
+    }
     if (password.length < 6) return setError('كلمة المرور يجب ألا تقل عن 6 أحرف');
     if (!center) return setError('أدخل كود السنتر أولاً');
 
@@ -80,6 +109,8 @@ export default function RegisterStudentScreen() {
         phone: normalizePhone(phone),
         guardianPhone: normalizePhone(guardianPhone),
         password,
+        gradeId,
+        groupId,
       });
       await refresh();
       Alert.alert(
@@ -87,6 +118,27 @@ export default function RegisterStudentScreen() {
         `أصبح حسابك مرتبطاً بسنتر «${center.name}» تلقائياً.\nلن تحتاج كود السنتر مرة أخرى عند تسجيل الدخول.`,
       );
     } catch (e) {
+      const m = String((e as any)?.message ?? '').toLowerCase();
+      // التأكيد مفعّل: نحفظ البيانات معلقة ونطلب تأكيد البريد ثم الدخول
+      if (m.includes('email_confirmation_required')) {
+        await savePendingRegistration({
+          kind: 'student',
+          email: email.trim().toLowerCase(),
+          centerId: center.id,
+          fullName: fullName.trim(),
+          phone: normalizePhone(phone),
+          guardianPhone: normalizePhone(guardianPhone),
+          gradeId,
+          groupId,
+        });
+        setBusy(false);
+        Alert.alert(
+          'أكّد بريدك الإلكتروني',
+          'أرسلنا رابط تأكيد إلى بريدك لمنع الحسابات الوهمية.\nافتحه من نفس هذا الجهاز ثم سجّل دخولك وسيُرتبط حسابك بسنترك تلقائياً.',
+          [{ text: 'تسجيل الدخول', onPress: () => router.push('/auth/login-student') }],
+        );
+        return;
+      }
       setError(arabicError(e));
     } finally {
       setBusy(false);
@@ -119,11 +171,29 @@ export default function RegisterStudentScreen() {
               style={{ writingDirection: 'ltr' }}
             />
             <FormMessage type="error" text={error} />
-            <AppButton title="تحقق من الكود" icon="search" onPress={verifyCode} loading={busy} />
+            <AppButton title="تحقق من الكود" icon="search" onPress={() => verifyCode()} loading={busy} />
+            <View style={{ height: spacing.sm }} />
+            <AppButton
+              title="مسح باركود السنتر بدل الكتابة"
+              icon="qr-code"
+              variant="outline"
+              small
+              onPress={async () => {
+                if (!permission?.granted) {
+                  const res = await requestPermission();
+                  if (!res.granted) {
+                    setError('امنح إذن الكاميرا أولاً لمسح الباركود — أو اكتب الكود يدوياً');
+                    return;
+                  }
+                }
+                scanLock.current = false;
+                setScanOpen(true);
+              }}
+            />
           </Card>
         ) : (
           <>
-            {/* بطاقة السنتر المؤكد */}
+              {/* بطاقة السنتر المؤكد */}
             <Card style={styles.centerCard}>
               <View style={styles.centerRow}>
                 <View style={styles.centerIcon}>
@@ -139,6 +209,29 @@ export default function RegisterStudentScreen() {
                 تأكد أن هذا هو سنترك قبل المتابعة — سيرتبط حسابك به نهائياً
               </Text>
             </Card>
+
+            {grades.length > 0 || groups.length > 0 ? (
+              <Card style={{ marginTop: spacing.md }}>
+                <OptionPicker
+                  label="صفك الدراسي (اختياري)"
+                  icon="school"
+                  value={gradeId}
+                  options={grades.map((g) => ({ value: g.id, label: g.name }))}
+                  onChange={(v) => { setGradeId(v); setGroupId(null); }}
+                  placeholder="اختر صفك..."
+                />
+                <View style={{ height: spacing.sm }} />
+                <OptionPicker
+                  label="مجموعتك (اختياري)"
+                  icon="albums"
+                  value={groupId}
+                  options={(gradeId ? groups.filter((g) => !g.grade_id || g.grade_id === gradeId) : groups)
+                    .map((g) => ({ value: g.id, label: g.name }))}
+                  onChange={setGroupId}
+                  placeholder="اختر مجموعتك..."
+                />
+              </Card>
+            ) : null}
 
             <Card style={{ marginTop: spacing.md }}>
               <AppInput
@@ -171,7 +264,7 @@ export default function RegisterStudentScreen() {
                 style={{ writingDirection: 'ltr' }}
               />
               <AppInput
-                label="رقم هاتف ولي الأمر (اختياري)"
+                label="رقم هاتف ولي الأمر (إجباري)"
                 icon="people"
                 placeholder="01xxxxxxxxx"
                 value={guardianPhone}
@@ -207,6 +300,35 @@ export default function RegisterStudentScreen() {
           </>
         )}
       </KeyboardScreen>
+
+      {/* ماسح باركود السنتر */}
+      <Modal visible={scanOpen} animationType="slide" onRequestClose={() => setScanOpen(false)}>
+        <View style={styles.scanWrap}>
+          {permission?.granted ? (
+            <CameraView
+              style={styles.scanCamera}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={({ data }) => {
+                if (scanLock.current) return;
+                const decoded = decodeCenterQr(data);
+                if (!decoded) return;
+                scanLock.current = true;
+                setScanOpen(false);
+                setCode(decoded.code);
+                void verifyCode(decoded.code);
+              }}
+            />
+          ) : null}
+          <View style={styles.scanOverlay} pointerEvents="none">
+            <View style={styles.scanFrame} />
+            <Text style={styles.scanHint}>وجّه الكاميرا لباركود السنتر المطبوع</Text>
+          </View>
+          <View style={styles.scanClose}>
+            <AppButton title="إدخال الكود يدوياً" variant="ghost" small onPress={() => setScanOpen(false)} />
+          </View>
+        </View>
+      </Modal>
     </GradientScreen>
   );
 }
@@ -244,5 +366,19 @@ const styles = StyleSheet.create({
   },
   uniqueNoteText: {
     flex: 1, color: colors.info, fontSize: font.sm, textAlign: 'right', lineHeight: 20,
+  },
+  scanWrap: { flex: 1, backgroundColor: '#000', position: 'relative' },
+  scanCamera: { ...StyleSheet.absoluteFillObject },
+  scanOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  scanFrame: {
+    width: 250, height: 250, borderRadius: 12,
+    borderWidth: 3, borderColor: colors.cyan, backgroundColor: 'transparent',
+  },
+  scanHint: { color: '#fff', fontSize: font.md, fontWeight: '700', marginTop: spacing.lg },
+  scanClose: {
+    position: 'absolute', bottom: spacing.xxl, left: spacing.lg, right: spacing.lg,
   },
 });
