@@ -4,15 +4,16 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import React, { useCallback, useState } from 'react';
-import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { AppButton, AppInput, EmptyState, ListItem, LoadingView } from '../../src/components/controls';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppButton, AppInput, Card, EmptyState, LoadingView, SheetHandle } from '../../src/components/controls';
 import { GradientScreen, ScreenHeader } from '../../src/components/layout';
-import { DaysPicker, FormMessage, OptionPicker } from '../../src/components/pickers';
+import { DaysPicker, FormMessage, OptionPicker, TimePicker } from '../../src/components/pickers';
 import { deleteGroup, fetchGrades, fetchGroups, upsertGroup } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
-import type { Grade, Group } from '../../src/lib/types';
-import { arabicError, formatDays, formatMoney } from '../../src/lib/utils';
+import { isOwner } from '../../src/lib/staff';
+import type { BillingType, Grade, Group } from '../../src/lib/types';
+import { arabicError, billingLabel, findGroupConflicts, formatDays, formatMoney, formatTimeAr, minutesToTime24, timeToMinutes } from '../../src/lib/utils';
 import { colors, font, radius, spacing } from '../../src/theme';
 
 export default function GroupsScreen() {
@@ -31,6 +32,11 @@ export default function GroupsScreen() {
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [fee, setFee] = useState('');
+  const [teacherName, setTeacherName] = useState('');
+  const [teacherPhone, setTeacherPhone] = useState('');
+  const [billing, setBilling] = useState<BillingType>('monthly');
+  const [weeklyPrice, setWeeklyPrice] = useState('');
+  const [sessionPrice, setSessionPrice] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -48,33 +54,64 @@ export default function GroupsScreen() {
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const gradeName = (id: string | null) => grades.find((g) => g.id === id)?.name ?? '';
+  const conflicts = useMemo(() => findGroupConflicts(groups), [groups]);
+  // المدرس: عرض التفاصيل فقط — الإنشاء والتعديل والحذف للمالك
+  const canManage = isOwner(profile);
 
   const openAdd = () => {
     setEditing(null); setName(''); setGradeId(null); setDays([]);
-    setStartTime(''); setEndTime(''); setFee(''); setFormError(null);
+    setStartTime(''); setEndTime(''); setFee('');
+    setTeacherName(''); setTeacherPhone('');
+    setBilling('monthly'); setWeeklyPrice(''); setSessionPrice('');
+    setFormError(null);
     setFormOpen(true);
+  };
+
+  // تطبيع أي صيغة وقت قديمة ("4:00 م" أو "HH:MM") إلى "HH:MM"
+  const to24 = (t: string | null | undefined) => {
+    const m = timeToMinutes(t);
+    return m === null ? '' : minutesToTime24(m);
   };
 
   const openEdit = (g: Group) => {
     setEditing(g); setName(g.name); setGradeId(g.grade_id);
-    setDays(g.days ?? []); setStartTime(g.start_time ?? ''); setEndTime(g.end_time ?? '');
-    setFee(g.monthly_fee ? String(g.monthly_fee) : ''); setFormError(null);
+    setDays(g.days ?? []); setStartTime(to24(g.start_time)); setEndTime(to24(g.end_time));
+    setTeacherName(g.teacher_name ?? ''); setTeacherPhone(g.teacher_phone ?? '');
+    setFee(g.monthly_fee ? String(g.monthly_fee) : '');
+    setBilling(g.billing_type ?? 'monthly');
+    setWeeklyPrice(g.weekly_price ? String(g.weekly_price) : '');
+    setSessionPrice(g.session_price ? String(g.session_price) : '');
+    setFormError(null);
     setFormOpen(true);
   };
 
   const save = async () => {
     setFormError(null);
     if (!name.trim()) return setFormError('أدخل اسم المجموعة');
+    if (days.length === 0) return setFormError('اختر يوماً واحداً على الأقل للمجموعة');
+    const sMin = timeToMinutes(startTime);
+    const eMin = timeToMinutes(endTime);
+    if ((startTime && !endTime) || (!startTime && endTime)) {
+      return setFormError('حدد وقتي البداية والنهاية معاً أو اتركهما فارغين');
+    }
+    if (sMin !== null && eMin !== null && eMin <= sMin) {
+      return setFormError('وقت النهاية يجب أن يكون بعد وقت البداية');
+    }
     setBusy(true);
     try {
       await upsertGroup(centerId, {
         id: editing?.id,
         name,
+        teacher_name: teacherName,
+        teacher_phone: teacherPhone,
         grade_id: gradeId,
         days,
         start_time: startTime.trim(),
         end_time: endTime.trim(),
         monthly_fee: Number(fee) || 0,
+        billing_type: billing,
+        weekly_price: Number(weeklyPrice) || 0,
+        session_price: Number(sessionPrice) || 0,
       });
       setFormOpen(false);
       await load();
@@ -108,11 +145,22 @@ export default function GroupsScreen() {
         title="المجموعات"
         subtitle={`${groups.length} مجموعة`}
         right={
-          <Pressable style={styles.addBtn} onPress={openAdd}>
-            <Ionicons name="add" size={24} color="#fff" />
-          </Pressable>
+          canManage ? (
+              <Pressable style={styles.addBtn} onPress={openAdd}>
+                <Ionicons name="add" size={24} color="#052E22" />
+              </Pressable>
+          ) : undefined
         }
       />
+
+      {!loading && conflicts.length > 0 ? (
+        <View style={{ paddingHorizontal: spacing.lg }}>
+          <FormMessage
+            type="error"
+            text={`تنبيه تعارض مواعيد (${conflicts.length}): ${conflicts.slice(0, 2).map((c) => `«${c.aName}» × «${c.bName}»`).join('، ')} — راجع الجدول الأسبوعي`}
+          />
+        </View>
+      ) : null}
 
       {loading ? (
         <LoadingView message="جاري تحميل المجموعات..." />
@@ -132,27 +180,12 @@ export default function GroupsScreen() {
           refreshing={loading}
           onRefresh={() => { setLoading(true); void load(); }}
           renderItem={({ item }) => (
-            <ListItem
-              title={item.name}
-              subtitle={[
-                gradeName(item.grade_id),
-                formatDays(item.days),
-                item.start_time ? `${item.start_time}${item.end_time ? ' - ' + item.end_time : ''}` : '',
-                item.monthly_fee ? formatMoney(item.monthly_fee) + ' شهرياً' : '',
-              ].filter(Boolean).join('\n')}
-              icon="albums"
-              iconColor={colors.primary}
-              badge={{ text: `${item.students_count} طالب`, color: colors.cyan, bg: colors.infoBg }}
-              right={
-                <View style={{ flexDirection: 'row', gap: spacing.xs }}>
-                  <Pressable hitSlop={8} onPress={() => openEdit(item)} style={styles.miniBtn}>
-                    <Ionicons name="create" size={16} color={colors.cyan} />
-                  </Pressable>
-                  <Pressable hitSlop={8} onPress={() => confirmDelete(item)} style={styles.miniBtn}>
-                    <Ionicons name="trash" size={16} color={colors.danger} />
-                  </Pressable>
-                </View>
-              }
+            <GroupCard
+              group={item}
+              gradeLabel={gradeName(item.grade_id)}
+              canManage={canManage}
+              onEdit={() => openEdit(item)}
+              onDelete={() => confirmDelete(item)}
             />
           )}
         />
@@ -162,8 +195,18 @@ export default function GroupsScreen() {
       <Modal visible={formOpen} transparent animationType="slide" onRequestClose={() => setFormOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
+            <SheetHandle />
             <Text style={styles.modalTitle}>{editing ? 'تعديل المجموعة' : 'إنشاء مجموعة جديدة'}</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
             <AppInput label="اسم المجموعة" icon="albums" placeholder="مثال: مجموعة السبت والثلاثاء" value={name} onChangeText={setName} />
+            <View style={{ flexDirection: 'row', gap: spacing.md }}>
+              <View style={{ flex: 1 }}>
+                <AppInput label="مدرس المجموعة (اختياري)" icon="person" placeholder="مثال: مستر أحمد" value={teacherName} onChangeText={setTeacherName} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppInput label="هاتف المدرس" icon="call" placeholder="01xxxxxxxxx" value={teacherPhone} onChangeText={setTeacherPhone} keyboardType="phone-pad" textAlign="left" style={{ writingDirection: 'ltr' }} />
+              </View>
+            </View>
             <OptionPicker
               label="الصف الدراسي (اختياري)"
               icon="school"
@@ -173,28 +216,59 @@ export default function GroupsScreen() {
               placeholder="اختر الصف..."
             />
             <DaysPicker value={days} onChange={setDays} />
-            <View style={{ flexDirection: 'row', gap: spacing.md }}>
-              <View style={{ flex: 1 }}>
-                <AppInput label="من الساعة" icon="time" placeholder="4:00 م" value={startTime} onChangeText={setStartTime} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <AppInput label="إلى الساعة" icon="time" placeholder="6:00 م" value={endTime} onChangeText={setEndTime} />
-              </View>
-            </View>
-            <AppInput
-              label="الرسوم الشهرية (ج.م)"
-              icon="wallet"
-              placeholder="مثال: 200"
-              value={fee}
-              onChangeText={setFee}
-              keyboardType="numeric"
-              textAlign="left"
-              style={{ writingDirection: 'ltr' }}
+            <TimePicker label="من الساعة" value={startTime} onChange={setStartTime} />
+            <TimePicker label="إلى الساعة" value={endTime} onChange={setEndTime} />
+            <OptionPicker
+              label="نظام التسعير"
+              icon="pricetag"
+              value={billing}
+              options={[
+                { value: 'monthly', label: 'شهري — مبلغ ثابت كل شهر' },
+                { value: 'weekly', label: 'أسبوعي — السعر × 4 أسابيع' },
+                { value: 'per_session', label: 'بالحصة — السعر × عدد حصص الشهر' },
+              ]}
+              onChange={(v) => setBilling(v as BillingType)}
             />
+            {billing === 'monthly' ? (
+              <AppInput
+                label="الرسوم الشهرية (ج.م)"
+                icon="wallet"
+                placeholder="مثال: 200"
+                value={fee}
+                onChangeText={setFee}
+                keyboardType="numeric"
+                textAlign="left"
+                style={{ writingDirection: 'ltr' }}
+              />
+            ) : billing === 'weekly' ? (
+              <AppInput
+                label="سعر الأسبوع (ج.م)"
+                icon="wallet"
+                placeholder="مثال: 50"
+                value={weeklyPrice}
+                onChangeText={setWeeklyPrice}
+                keyboardType="numeric"
+                textAlign="left"
+                style={{ writingDirection: 'ltr' }}
+              />
+            ) : (
+              <AppInput
+                label="سعر الحصة (ج.م)"
+                icon="wallet"
+                placeholder="مثال: 25"
+                value={sessionPrice}
+                onChangeText={setSessionPrice}
+                keyboardType="numeric"
+                textAlign="left"
+                style={{ writingDirection: 'ltr' }}
+              />
+            )}
             <FormMessage type="error" text={formError} />
             <AppButton title={editing ? 'حفظ التعديلات' : 'إنشاء المجموعة'} icon="checkmark" onPress={save} loading={busy} />
             <View style={{ height: spacing.sm }} />
             <AppButton title="إلغاء" variant="ghost" small onPress={() => setFormOpen(false)} />
+            <View style={{ height: spacing.xl }} />
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -202,14 +276,97 @@ export default function GroupsScreen() {
   );
 }
 
+/** بطاقة مجموعة تعرض كل التفاصيل من الخارج بلا حاجة لفتح التعديل */
+function GroupCard({ group, gradeLabel, canManage, onEdit, onDelete }: {
+  group: Group; gradeLabel: string; canManage: boolean; onEdit: () => void; onDelete: () => void;
+}) {
+  const timeLabel = timeToMinutes(group.start_time) !== null
+    ? `${formatTimeAr(group.start_time)}${timeToMinutes(group.end_time) !== null ? ' - ' + formatTimeAr(group.end_time) : ''}`
+    : '';
+  const billing = group.billing_type ?? 'monthly';
+  const priceLabel = billing === 'weekly' && Number(group.weekly_price) > 0
+    ? `${formatMoney(group.weekly_price)} أسبوعياً`
+    : billing === 'per_session' && Number(group.session_price) > 0
+      ? `${formatMoney(group.session_price)} للحصة`
+      : Number(group.monthly_fee) > 0
+        ? `${formatMoney(group.monthly_fee)} شهرياً`
+        : '';
+  return (
+    <Card style={styles.groupCard}>
+      <View style={styles.groupHead}>
+        <View style={styles.groupIcon}>
+          <Ionicons name="albums" size={20} color={colors.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.groupName} numberOfLines={1}>{group.name}</Text>
+          {gradeLabel ? <Text style={styles.groupGrade}>{gradeLabel}</Text> : null}
+        </View>
+        <View style={styles.countPill}>
+          <Text style={styles.countText}>{group.students_count} طالب</Text>
+        </View>
+      </View>
+      <View style={styles.groupMeta}>
+        <MetaLine icon="calendar" text={formatDays(group.days)} />
+        {timeLabel ? <MetaLine icon="time" text={timeLabel} /> : null}
+        {priceLabel ? <MetaLine icon="wallet" text={priceLabel} /> : null}
+        {group.teacher_name ? <MetaLine icon="person" text={`المدرس: ${group.teacher_name}`} /> : null}
+      </View>
+      {canManage ? (
+        <View style={styles.groupActions}>
+          <Pressable hitSlop={8} onPress={onEdit} style={styles.actionBtn}>
+            <Ionicons name="create" size={16} color={colors.cyan} />
+            <Text style={[styles.actionText, { color: colors.cyan }]}>تعديل</Text>
+          </Pressable>
+          <Pressable hitSlop={8} onPress={onDelete} style={styles.actionBtn}>
+            <Ionicons name="trash" size={16} color={colors.danger} />
+            <Text style={[styles.actionText, { color: colors.danger }]}>حذف</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
+function MetaLine({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
+  return (
+    <View style={styles.metaLine}>
+      <Ionicons name={icon} size={15} color={colors.textMuted} />
+      <Text style={styles.metaText}>{text}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  groupCard: { marginBottom: spacing.md },
+  groupHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  groupIcon: {
+    width: 44, height: 44, borderRadius: radius.md,
+    backgroundColor: colors.primary + '22', borderWidth: 1, borderColor: colors.primary + '55',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  groupName: { color: colors.text, fontSize: font.lg, fontWeight: '800', textAlign: 'right' },
+  groupGrade: { color: colors.info, fontSize: font.sm, fontWeight: '700', textAlign: 'right', marginTop: 2 },
+  countPill: {
+    backgroundColor: colors.infoBg, borderRadius: radius.full,
+    paddingHorizontal: spacing.md, paddingVertical: 5,
+  },
+  countText: { color: colors.cyan, fontSize: font.xs, fontWeight: '800' },
+  groupMeta: { gap: spacing.xs, marginTop: spacing.md },
+  metaLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  metaText: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', flex: 1 },
+  groupActions: {
+    flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md,
+    borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md,
+  },
+  actionBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: spacing.xs, backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md, paddingVertical: spacing.sm,
+  },
+  actionText: { fontSize: font.sm, fontWeight: '800' },
   addBtn: {
     width: 40, height: 40, borderRadius: radius.full,
     backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
-  },
-  miniBtn: {
-    width: 32, height: 32, borderRadius: radius.sm,
-    backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center',
   },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
   modalSheet: {

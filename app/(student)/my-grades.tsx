@@ -19,7 +19,7 @@ export default function MyGradesScreen() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    if (!profile?.student_id) return;
+    if (!profile?.student_id) { setLoading(false); return; }
     try {
       setRows(await fetchGradesForStudent(profile.student_id));
     } catch { /* ignore */ }

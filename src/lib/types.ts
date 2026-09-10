@@ -2,7 +2,35 @@
 // الأنواع المطابقة لمخطط قاعدة البيانات (supabase/android_multitenant_schema.sql)
 // ============================================================
 
-export type Role = 'super_admin' | 'center_admin' | 'student';
+export type Role = 'super_admin' | 'center_admin' | 'student' | 'teacher' | 'manager' | 'secretary';
+
+export interface SubscriptionRequest {
+  id: string;
+  center_id: string;
+  plan: string;
+  months: number;
+  amount: number;
+  transfer_at: string;
+  status: 'pending' | 'approved' | 'rejected';
+  notes: string | null;
+  created_at: string;
+}
+
+export interface ActivityLog {
+  id: string;
+  center_id: string;
+  actor_id: string;
+  actor_name: string;
+  action: string;
+  details: string;
+  created_at: string;
+}
+
+export type TeacherPermKey =
+  | 'attendance' | 'exams' | 'grades' | 'reports' | 'announcements'
+  | 'surveys' | 'honors' | 'inquiries' | 'collect' | 'notify';
+
+export type TeacherPerms = Partial<Record<TeacherPermKey, boolean>>;
 
 export interface Profile {
   id: string;
@@ -13,13 +41,18 @@ export interface Profile {
   email: string | null;
   phone: string | null;
   is_active: boolean;
+  perms: TeacherPerms;
+  push_token?: string | null;
   created_at: string;
 }
+
+export type CenterKind = 'center' | 'solo';
 
 export interface Center {
   id: string;
   name: string;
   code: string;
+  kind: CenterKind;
   owner_name: string;
   owner_email: string | null;
   owner_phone: string | null;
@@ -35,15 +68,22 @@ export interface Grade {
   created_at: string;
 }
 
+export type BillingType = 'monthly' | 'weekly' | 'per_session';
+
 export interface Group {
   id: string;
   center_id: string;
   grade_id: string | null;
   name: string;
+  teacher_name: string;
+  teacher_phone: string | null;
   days: string[];
   start_time: string;
   end_time: string;
   monthly_fee: number;
+  billing_type: BillingType;
+  weekly_price: number;
+  session_price: number;
   students_count: number;
 }
 
@@ -135,7 +175,7 @@ export interface Announcement {
   created_at: string;
 }
 
-export type PlanType = 'monthly' | 'yearly' | 'custom';
+export type PlanType = 'monthly' | 'yearly' | 'custom' | 'trial' | 'center_full' | 'center_medium' | 'solo_teacher';
 export type SubscriptionStatus = 'active' | 'expired' | 'suspended';
 
 export interface Subscription {
@@ -153,6 +193,7 @@ export interface CenterLookup {
   id: string;
   name: string;
   owner_name: string;
+  status: 'active' | 'suspended';
 }
 
 export interface MySubscription {
@@ -161,6 +202,114 @@ export interface MySubscription {
   ends_on: string | null;
   days_left: number | null;
   center_status: string;
+}
+
+export type ExamQuestionType = 'mcq' | 'tf' | 'essay';
+
+export interface ExamQuestion {
+  q: string;
+  type: ExamQuestionType;
+  choices: string[];
+  marks: number;
+}
+
+export interface AppExam {
+  id: string;
+  center_id: string;
+  title: string;
+  subject: string;
+  grade_id: string | null;
+  duration_minutes: number;
+  questions: ExamQuestion[];
+  answers: number[];
+  total_score: number;
+  is_published: boolean;
+  created_at: string;
+}
+
+export interface PublishedExam {
+  id: string;
+  title: string;
+  subject: string;
+  grade_id: string | null;
+  duration_minutes: number;
+  total_score: number;
+  questions: ExamQuestion[];
+  attempted: boolean;
+  created_at: string;
+}
+
+export interface ExamAttempt {
+  id: string;
+  center_id: string;
+  exam_id: string;
+  student_id: string;
+  answers: (number | string | null)[];
+  score: number;
+  max_score: number;
+  status: 'graded' | 'pending_review';
+  created_at: string;
+}
+
+export type InquiryKind = 'question' | 'transfer' | 'registration' | 'other';
+export type InquiryStatus = 'pending' | 'answered' | 'approved' | 'rejected' | 'closed';
+
+export interface AppInquiry {
+  id: string;
+  center_id: string;
+  student_id: string | null;
+  kind: InquiryKind;
+  subject: string;
+  body: string;
+  status: InquiryStatus;
+  reply: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppSurvey {
+  id: string;
+  center_id: string;
+  title: string;
+  questions: string[];
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AppSurveyResponse {
+  id: string;
+  center_id: string;
+  survey_id: string;
+  student_id: string;
+  answers: string[];
+  created_at: string;
+}
+
+export type NotificationAudience = 'all' | 'grade' | 'group' | 'student' | 'owners';
+
+export interface AppNotification {
+  id: string;
+  center_id: string;
+  audience: NotificationAudience;
+  audience_id: string | null;
+  title: string;
+  body: string;
+  created_at: string;
+}
+
+export interface MyNotification {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  is_read: boolean;
+}
+
+export interface CenterSettings {
+  whatsapp: string;
+  contact_email: string;
+  registration_open: boolean;
+  archive_year: string;
 }
 
 export interface PublicConfig {

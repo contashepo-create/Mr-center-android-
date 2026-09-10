@@ -5,6 +5,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { getSupabase, initSupabase, isSupabaseReady } from './supabase';
+import { registerPushToken } from './push';
 import type { MySubscription, Profile, Role } from './types';
 
 interface SessionState {
@@ -46,10 +47,31 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       if (prof) {
         const { data: sub } = await sb.rpc('get_my_subscription');
         setSubscription((sub as MySubscription) ?? null);
+        void registerPushToken();
       } else {
         setSubscription(null);
       }
     } catch {
+      // عطل عابر (شبكة) — إعادة محاولة واحدة بعد ثانيتين قبل الاستسلام
+      try {
+        await new Promise((r) => setTimeout(r, 2000));
+        const sb = getSupabase();
+        const { data: prof } = await sb
+          .from('profiles')
+          .select('*')
+          .eq('id', sess.user.id)
+          .maybeSingle();
+        setProfile((prof as Profile) ?? null);
+        if (prof) {
+          const { data: sub } = await sb.rpc('get_my_subscription');
+          setSubscription((sub as MySubscription) ?? null);
+        } else {
+          setSubscription(null);
+        }
+        return;
+      } catch {
+        // تجاهل
+      }
       setProfile(null);
       setSubscription(null);
     }

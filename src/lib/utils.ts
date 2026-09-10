@@ -41,6 +41,29 @@ export function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
+/** نطاقات البريد الموثوقة فقط — لمنع الإيميلات المؤقتة والوهمية */
+const TRUSTED_EMAIL_DOMAINS = [
+  'gmail.com', 'yahoo.com', 'yahoo.co.uk', 'outlook.com', 'hotmail.com',
+  'live.com', 'msn.com', 'icloud.com', 'me.com', 'mac.com',
+  'proton.me', 'protonmail.com', 'yandex.com', 'yandex.ru',
+  'aol.com', 'gmx.com', 'zoho.com',
+];
+
+export function emailDomain(email: string): string {
+  const parts = email.trim().toLowerCase().split('@');
+  return parts.length === 2 ? parts[1] : '';
+}
+
+/** هل نطاق البريد من الموفرين المعروفين؟ */
+export function isAllowedEmailDomain(email: string): boolean {
+  return TRUSTED_EMAIL_DOMAINS.includes(emailDomain(email));
+}
+
+/** بريد صالح + نطاق موثوق (للتسجيل الجديد) */
+export function isValidSignupEmail(email: string): boolean {
+  return isValidEmail(email) && isAllowedEmailDomain(email);
+}
+
 /** التحقق من رقم هاتف مصري/دولي (8 إلى 15 رقم) */
 export function isValidPhone(phone: string): boolean {
   const p = normalizePhone(phone).replace(/^\+/, '');
@@ -94,6 +117,123 @@ export function formatMoney(amount: number | null | undefined): string {
   return `${n.toLocaleString('en-EG', { maximumFractionDigits: 2 })} ج.م`;
 }
 
+/** تحويل نص وقت ("HH:MM" أو "h:mm ص/م") إلى دقائق منذ منتصف الليل */
+export function timeToMinutes(t: string | null | undefined): number | null {
+  if (!t) return null;
+  const s = t.trim().replace(/\s+/g, ' ');
+  let m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m) {
+    const h = Number(m[1]);
+    const mm = Number(m[2]);
+    if (h >= 0 && h < 24 && mm >= 0 && mm < 60) return h * 60 + mm;
+    return null;
+  }
+  m = s.match(/^(\d{1,2}):(\d{2}) (ص|م|صباحاً|مساءً|AM|PM|am|pm)$/);
+  if (m) {
+    let h = Number(m[1]);
+    const mm = Number(m[2]);
+    const per = m[3];
+    if (h < 1 || h > 12 || mm < 0 || mm > 59) return null;
+    const isPm = per === 'م' || per === 'مساءً' || per.toLowerCase() === 'pm';
+    if (h === 12) h = isPm ? 12 : 0;
+    else if (isPm) h += 12;
+    return h * 60 + mm;
+  }
+  return null;
+}
+
+/** تحويل دقائق منذ منتصف الليل إلى "HH:MM" */
+export function minutesToTime24(min: number): string {
+  const h = Math.floor(min / 60) % 24;
+  const mm = min % 60;
+  return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+/** تنسيق نص وقت للعرض العربي ("4:30 م") */
+export function formatTimeAr(t: string | null | undefined): string {
+  const min = timeToMinutes(t);
+  if (min === null) return t?.trim() ? String(t).trim() : '—';
+  const h24 = Math.floor(min / 60) % 24;
+  const mm = min % 60;
+  const period = h24 < 12 ? 'ص' : 'م';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h12}:${String(mm).padStart(2, '0')} ${period}`;
+}
+
+/** التحقق من صلاحية أسئلة امتحان قبل الحفظ/النشر — يرد رسالة الخطأ أو null */
+export function validateExamDraft(qs: {
+  q: string; type: string; choices: string[]; marks: number;
+}[]): string | null {
+  if (!qs || qs.length === 0) return 'أضف سؤالاً واحداً على الأقل';
+  for (let i = 0; i < qs.length; i++) {
+    const n = i + 1;
+    if (!qs[i].q.trim()) return `اكتب نص السؤال رقم ${n}`;
+    if (!(Number(qs[i].marks) > 0)) return `حدد درجة صحيحة للسؤال رقم ${n}`;
+    if (qs[i].type === 'mcq' && qs[i].choices.slice(0, 4).some((c) => !c.trim())) {
+      return `أكمل الاختيارات الأربعة للسؤال رقم ${n}`;
+    }
+  }
+  return null;
+}
+
+/** مجموع درجات أسئلة امتحان */
+export function examMarksTotal(qs: { marks: number }[]): number {
+  return qs.reduce((s, q) => s + (Number(q.marks) || 0), 0);
+}
+
+/** وصف نظام التسعير لمجموعة */
+export function billingLabel(billingType: string | null | undefined): string {
+  if (billingType === 'weekly') return 'أسبوعي';
+  if (billingType === 'per_session') return 'بالحصة';
+  return 'شهري';
+}
+
+/** كشف تعارض المواعيد بين المجموعات (أيام مشتركة + أوقات متقاطعة) */
+export function findGroupConflicts(groups: {
+  id: string; name: string; days: string[] | null;
+  start_time: string | null; end_time: string | null;
+}[]): { aName: string; bName: string; days: string }[] {
+  const out: { aName: string; bName: string; days: string }[] = [];
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) {
+      const a = groups[i];
+      const b = groups[j];
+      const shared = (a.days ?? []).filter((d) => (b.days ?? []).includes(d));
+      if (shared.length === 0) continue;
+      const s1 = timeToMinutes(a.start_time);
+      const e1 = timeToMinutes(a.end_time);
+      const s2 = timeToMinutes(b.start_time);
+      const e2 = timeToMinutes(b.end_time);
+      if (s1 === null || e1 === null || s2 === null || e2 === null) continue;
+      if (Math.max(s1, s2) < Math.min(e1, e2)) {
+        out.push({ aName: a.name, bName: b.name, days: formatDays(shared) });
+      }
+    }
+  }
+  return out;
+}
+
+/** إزاحة تاريخ ISO (YYYY-MM-DD) بعدد أيام */
+export function shiftDateIso(iso: string, deltaDays: number): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return iso;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + deltaDays);
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
+}
+
+/** التحقق من صيغة رابط ويب عام (ملفات/روابط السنتر) */
+export function isValidHttpUrl(url: string): boolean {
+  try {
+    const u = new URL(url.trim());
+    return (u.protocol === 'https:' || u.protocol === 'http:') && u.hostname.includes('.');
+  } catch {
+    return false;
+  }
+}
+
 /** التحقق من صيغة رابط قاعدة البيانات */
 export function isValidSupabaseUrl(url: string): boolean {
   try {
@@ -128,10 +268,16 @@ export function compareVersions(a: string, b: string): number {
 
 /** تحويل رسائل أخطاء Supabase إلى رسائل عربية مفهومة */
 export function arabicError(err: unknown): string {
-  const msg = String((err as any)?.message ?? err ?? '').toLowerCase();
+  const raw = String((err as any)?.message ?? err ?? '');
+  const msg = raw.toLowerCase();
   if (!msg) return 'حدث خطأ غير متوقع، حاول مرة أخرى';
+  if (msg.includes('email_confirmation_required')) return 'تم إنشاء حسابك — أكّد بريدك من الرابط المرسل إليك ثم سجّل دخولك وسيُستكمل تسجيلك تلقائياً';
+  if (msg.includes('not_authenticated')) return 'تعذر إتمام التسجيل — سجّل دخولك أولاً ثم أعد المحاولة، وإن تكرر تواصل مع المطور';
+  if (msg.includes('already_registered')) return 'هذا الحساب مسجل من قبل — سجّل دخولك مباشرة';
   if (msg.includes('invalid login')) return 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
-  if (msg.includes('email not confirmed')) return 'يجب تأكيد البريد الإلكتروني أولاً';
+  if (msg.includes('email not confirmed')) return 'بريدك غير مؤكد بعد — افتح رابط التأكيد المرسل إلى بريدك ثم سجّل دخولك';
+  if (msg.includes('rate limit') || msg.includes('over_email_send_rate_limit') || msg.includes('too many'))
+    return 'ضغط مؤقت على إرسال البريد — انتظر دقائق ثم أعد المحاولة. (لو تكرر: فعّل SMTP خاص من لوحة Supabase)';
   if (msg.includes('user already registered') || msg.includes('already been registered'))
     return 'هذا البريد الإلكتروني مستخدم من قبل — سجّل دخولك أو استخدم بريداً آخر';
   if (msg.includes('password') && msg.includes('at least'))
@@ -147,6 +293,20 @@ export function arabicError(err: unknown): string {
   if (msg.includes('center_not_found') || msg.includes('invalid_center_code'))
     return 'كود السنتر غير صحيح — تأكد من الكود مع إدارة السنتر';
   if (msg.includes('center_suspended')) return 'هذا السنتر موقوف حالياً — تواصل مع إدارة التطبيق';
+  if (msg.includes('no_group_for_attendance')) return 'الطالب غير مسند لمجموعة — أسنده أولاً من ملفه ثم سجّل حضوره';
+  if (msg.includes('student_not_active')) return 'هذا الطالب غير نشط (موقوف أو مؤرشف) — لا يمكن تحضيره';
+  if (msg.includes('registration_closed')) return 'التسجيل مغلق حالياً في هذا السنتر — تواصل مع الإدارة';
+  if (msg.includes('same_guardian_phone')) return 'رقم ولي الأمر يجب أن يختلف عن رقم الطالب';
+  if (msg.includes('staff_limit_reached')) return 'اكتمل عدد هذا الدور في باقتك — رقِّ الباقة أو أوقف فرداً أولاً';
+  if (msg.includes('students_limit_reached')) return 'وصلت للحد الأقصى لطلاب باقتك (200) — رقِّ الباقة لسنتر';
+  if (msg.includes('staff_not_allowed')) return 'الحساب المنفرد بلا فريق تابع — رقِّ لسنتر متكامل أولاً';
+  if (msg.includes('invalid_role')) return 'الدور المطلوب غير صالح';
+  if (msg.includes('already_attempted')) return 'أديت هذا الامتحان من قبل — لا يمكن تكرار المحاولة';
+  if (msg.includes('already_answered')) return 'أجبت على هذا الاستبيان من قبل';
+  if (msg.includes('exam_not_found')) return 'الامتحان غير متاح حالياً';
+  if (msg.includes('invalid_group')) return 'المجموعة المختارة لا تخص هذا السنتر — أعد اختيارها';
+  if (msg.includes('invalid_grade')) return 'الصف المختار لا يخص هذا السنتر — أعد اختياره';
+  if (msg.includes('sharing_unavailable')) return 'المشاركة غير متاحة على هذا الجهاز';
   if (msg.includes('row-level security')) return 'ليس لديك صلاحية لتنفيذ هذا الإجراء';
   if (msg.includes('duplicate key')) return 'البيانات مسجلة من قبل ولا يمكن تكرارها';
   return (err as any)?.message ?? 'حدث خطأ غير متوقع، حاول مرة أخرى';

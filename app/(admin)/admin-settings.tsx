@@ -5,28 +5,73 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Alert, Share, StyleSheet, Text, View } from 'react-native';
-import { AppButton, Card, ListItem, SectionTitle } from '../../src/components/controls';
+import { Alert, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { AppButton, AppInput, Card, ListItem, NoAccess, SectionTitle } from '../../src/components/controls';
 import { BackHeader, GradientScreen, KeyboardScreen } from '../../src/components/layout';
-import { fetchMyCenter } from '../../src/lib/api';
+import { FormMessage } from '../../src/components/pickers';
+import { fetchCenterSettings, fetchMyCenter, saveCenterSettings } from '../../src/lib/api';
+import { isOwner } from '../../src/lib/staff';
 import { useSession } from '../../src/lib/session';
 import { fetchPublicConfig } from '../../src/lib/supabase';
-import type { Center, PublicConfig } from '../../src/lib/types';
-import { formatDate } from '../../src/lib/utils';
+import { exportCenterBackup } from '../../src/lib/backup';
+import type { Center, CenterSettings, PublicConfig } from '../../src/lib/types';
+import { planLabel } from '../../src/lib/billing';
+import { arabicError, formatDate, isValidEmail, isValidPhone } from '../../src/lib/utils';
 import { colors, font, radius, spacing } from '../../src/theme';
 
 export default function AdminSettingsScreen() {
   const { profile, subscription, signOut, refresh } = useSession();
   const [center, setCenter] = useState<Center | null>(null);
   const [cfg, setCfg] = useState<PublicConfig>({});
+  const [settings, setSettings] = useState<CenterSettings>({
+    whatsapp: '', contact_email: '', registration_open: true, archive_year: '',
+  });
+  const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
 
   useEffect(() => {
     if (profile?.center_id) {
       fetchMyCenter(profile.center_id).then(setCenter).catch(() => {});
+      fetchCenterSettings(profile.center_id).then(setSettings).catch(() => {});
     }
     fetchPublicConfig().then(setCfg);
     void refresh();
   }, [profile?.center_id, refresh]);
+
+  const saveSettings = async () => {
+    if (!profile?.center_id) return;
+    setSettingsMsg(null); setSettingsError(null);
+    if (settings.whatsapp.trim() && !isValidPhone(settings.whatsapp)) {
+      return setSettingsError('رقم الواتساب غير صحيح — اكتبه بكود الدولة بدون + (مثال: 2010xxxxxxxx)');
+    }
+    if (settings.contact_email.trim() && !isValidEmail(settings.contact_email)) {
+      return setSettingsError('بريد التواصل غير صحيح');
+    }
+    setSaving(true);
+    try {
+      await saveCenterSettings(profile.center_id, settings);
+      setSettingsMsg('تم حفظ إعدادات السنتر بنجاح');
+    } catch (e) {
+      setSettingsError(arabicError(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const backup = async (tag: string) => {
+    if (!profile?.center_id) return;
+    setBackupBusy(true);
+    try {
+      const name = await exportCenterBackup(profile.center_id, center?.name ?? 'center', tag);
+      Alert.alert('تم إنشاء النسخة', `حُفظت نسخة «${name}» — شاركها واحتفظ بها خارج الهاتف.`);
+    } catch (e) {
+      Alert.alert('تعذر النسخ', arabicError(e));
+    } finally {
+      setBackupBusy(false);
+    }
+  };
 
   const shareCode = async () => {
     if (!center) return;
@@ -46,6 +91,16 @@ export default function AdminSettingsScreen() {
 
   const subColor = subscription?.status === 'active' ? colors.success
     : subscription?.status === 'suspended' ? colors.danger : colors.warning;
+
+  // الإعدادات والاشتراك شأن المالك — الفريق لديه حسابه في «المزيد»
+  if (!isOwner(profile)) {
+    return (
+      <GradientScreen>
+        <BackHeader title="الإعدادات والاشتراك" />
+        <NoAccess />
+      </GradientScreen>
+    );
+  }
 
   return (
     <GradientScreen>
@@ -82,22 +137,89 @@ export default function AdminSettingsScreen() {
             </Text>
           </View>
           {subscription?.plan_type ? (
-            <Row label="نوع الباقة" value={
-              subscription.plan_type === 'monthly' ? 'شهرية'
-                : subscription.plan_type === 'yearly' ? 'سنوية' : 'مخصصة'
-            } />
+            <Row label="نوع الباقة" value={planLabel(subscription.plan_type)} />
           ) : null}
-          {subscription?.ends_on ? <Row label="تاريخ الانتهاء" value={subscription.ends_on} /> : null}
+          {subscription?.ends_on ? <Row label="تاريخ الانتهاء" value={formatDate(subscription.ends_on)} /> : null}
           {subscription?.days_left !== null && subscription?.days_left !== undefined ? (
-            <Row label="الأيام المتبقية" value={`${subscription.days_left} يوم`} />
+            <Row
+              label="الأيام المتبقية"
+              value={subscription.days_left <= 0 ? 'انتهت المدة' : `${subscription.days_left} يوم`}
+            />
           ) : null}
           <Text style={styles.note}>
             إدارة الاشتراكات وتجديدها تتم من قبل إدارة التطبيق.
             {cfg.contact_whatsapp ? ' تواصل معنا عبر واتساب من صفحة «حول التطبيق».' : ''}
           </Text>
           <View style={{ marginTop: spacing.sm }}>
+            <AppButton title="الباقات والترقية" icon="card" small onPress={() => router.push('/subscription')} />
+          </View>
+          <View style={{ marginTop: spacing.sm }}>
             <AppButton title="حول التطبيق والتواصل" icon="information-circle" variant="outline" small onPress={() => router.push('/about')} />
           </View>
+        </Card>
+
+        {/* الإعدادات التشغيلية */}
+        <SectionTitle title="الإعدادات التشغيلية" />
+        <Card>
+          <AppInput
+            label="واتساب التواصل (بكود الدولة بدون +)"
+            icon="logo-whatsapp"
+            placeholder="2010xxxxxxxx"
+            value={settings.whatsapp}
+            onChangeText={(v) => setSettings((s) => ({ ...s, whatsapp: v }))}
+            keyboardType="phone-pad"
+            textAlign="left"
+            style={{ writingDirection: 'ltr' }}
+          />
+          <AppInput
+            label="بريد التواصل"
+            icon="mail"
+            placeholder="support@mail.com"
+            value={settings.contact_email}
+            onChangeText={(v) => setSettings((s) => ({ ...s, contact_email: v }))}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            textAlign="left"
+            style={{ writingDirection: 'ltr' }}
+          />
+          <Pressable
+            style={styles.toggleRow}
+            onPress={() => setSettings((s) => ({ ...s, registration_open: !s.registration_open }))}
+          >
+            <Ionicons
+              name={settings.registration_open ? 'checkbox' : 'square-outline'}
+              size={22}
+              color={settings.registration_open ? colors.success : colors.textMuted}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.toggleTitle}>فتح تسجيل الطلاب الجدد</Text>
+              <Text style={styles.toggleSub}>
+                {settings.registration_open ? 'الطلاب يستطيعون الانضمام بكود سنترك' : 'مغلق — لن يقبل أي تسجيل جديد'}
+              </Text>
+            </View>
+          </Pressable>
+          <AppInput
+            label="السنة الدراسية/الأرشيفية (اختياري)"
+            icon="archive"
+            placeholder="مثال: 2026-2027"
+            value={settings.archive_year}
+            onChangeText={(v) => setSettings((s) => ({ ...s, archive_year: v }))}
+          />
+          <FormMessage type="error" text={settingsError} />
+          <FormMessage type="success" text={settingsMsg} />
+          <AppButton title="حفظ الإعدادات" icon="checkmark" small onPress={saveSettings} loading={saving} />
+        </Card>
+
+        {/* النسخ الاحتياطي */}
+        <SectionTitle title="النسخ الاحتياطي" />
+        <Card>
+          <Text style={styles.note}>
+            نسخة كاملة من كل بيانات سنترك (طلاب/حضور/مدفوعات/درجات/اختبارات...) في ملف واحد لمشاركته وحفظه خارج الهاتف.
+          </Text>
+          <View style={{ height: spacing.sm }} />
+          <AppButton title="نسخة احتياطية الآن" icon="cloud-upload" small onPress={() => backup('backup')} loading={backupBusy} />
+          <View style={{ height: spacing.sm }} />
+          <AppButton title="أرشفة السنة (نسخة مؤرخة)" icon="archive" small variant="outline" onPress={() => backup('archive')} loading={backupBusy} />
         </Card>
 
         {/* الحساب */}
@@ -144,4 +266,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted, fontSize: font.xs, marginTop: spacing.md,
     textAlign: 'right', lineHeight: 18,
   },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.md },
+  toggleTitle: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
+  toggleSub: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: 2 },
 });

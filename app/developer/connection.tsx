@@ -8,7 +8,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { AppButton, AppInput, Card, SectionTitle } from '../../src/components/controls';
+import { AppButton, AppInput, Card, LoadingView, SectionTitle } from '../../src/components/controls';
+import { DeveloperGate } from '../../src/components/DeveloperGate';
 import { BackHeader, GradientScreen, KeyboardScreen } from '../../src/components/layout';
 import { FormMessage } from '../../src/components/pickers';
 import {
@@ -24,9 +25,12 @@ import { arabicError } from '../../src/lib/utils';
 import { colors, font, spacing } from '../../src/theme';
 
 export default function ConnectionManager() {
-  const { reinitConnection } = useSession();
+  const { profile, ready, reinitConnection, signOut, refresh } = useSession();
+  const [tick, setTick] = useState(0);
+  // لقطة حية لبيانات الاتصال (تتحدث بعد كل حفظ/مسح)
   const active = getActiveConfig();
   const remote = getLastRemoteConfig();
+  void tick;
 
   const [url, setUrl] = useState('');
   const [anonKey, setAnonKey] = useState('');
@@ -60,9 +64,12 @@ export default function ConnectionManager() {
     try {
       await saveOverrideConfig(url, anonKey);
       await applyConfig({ url: url.trim(), anonKey: anonKey.trim(), source: 'override' });
+      // تبديل القاعدة يُبطل الجلسة القديمة — خروج إجباري ثم إعادة تهيئة نظيفة
+      await signOut();
       const status = await reinitConnection();
+      setTick((t) => t + 1);
       setNote(status === 'ready'
-        ? '✅ تعمل الآن على هذا الجهاز. اختبر، ثم انشر نفس المفاتيح في عامل كلاود فلير ليتبعها الجميع.'
+        ? '✅ تعمل الآن على هذا الجهاز (سُجل خروجك تلقائياً للأمان). اختبر، ثم انشر نفس المفاتيح في عامل كلاود فلير ليتبعها الجميع.'
         : 'حُفظت المفاتيح لكن تعذر الوصول لقاعدة البيانات — راجعها');
     } catch (e) {
       setError(arabicError(e));
@@ -73,7 +80,10 @@ export default function ConnectionManager() {
 
   const clearLocal = async () => {
     await clearOverrideConfig();
+    await signOut();
     await reinitConnection();
+    await refresh();
+    setTick((t) => t + 1);
     setNote('تم مسح المفاتيح اليدوية — عاد التطبيق ليتبع كلاود فلير');
   };
 
@@ -83,6 +93,15 @@ export default function ConnectionManager() {
     cache: 'مخزنة مؤقتاً (لا يوجد اتصال بكلاود فلير الآن)',
     builtin: 'مدمجة داخل التطبيق',
   };
+
+  if (!ready) {
+    return (
+      <GradientScreen>
+        <LoadingView message="..." />
+      </GradientScreen>
+    );
+  }
+  if (profile?.role !== 'super_admin') return <DeveloperGate />;
 
   return (
     <GradientScreen>

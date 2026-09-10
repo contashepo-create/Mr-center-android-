@@ -9,6 +9,7 @@
 --      • عزل كامل للبيانات بـ center_id عبر Row Level Security
 --
 --  ✦ آمن لإعادة التشغيل: كل شيء IF NOT EXISTS / OR REPLACE / TRANSACTION واحدة
+--  ✦ يعمل أيضاً على قاعدة جديدة فارغة: ينشئ جداول الموقع المشتركة بنفسه (قسم ١-ب)
 --  ✦ لا يحذف أي بيانات ولا يكسر الموقع الحالي:
 --      حساب الموقع القديم (بلا ملف في profiles) يحتفظ بصلاحية كاملة تلقائياً
 -- ============================================================================
@@ -45,6 +46,10 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   is_active   BOOLEAN NOT NULL DEFAULT true,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- أدوار الفريق الكاملة: مدير وسكرتير بجانب المدرس (ترقية للقواعد المنشأة سابقاً)
+ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_role_check;
+ALTER TABLE public.profiles ADD CONSTRAINT profiles_role_check
+  CHECK (role IN ('super_admin','center_admin','student','teacher','manager','secretary'));
 -- البريد ورقم الهاتف فريدان على مستوى النظام كله (حتى لو اختلف السنتر)
 CREATE UNIQUE INDEX IF NOT EXISTS profiles_email_unique
   ON public.profiles (lower(email)) WHERE email IS NOT NULL AND email <> '';
@@ -52,6 +57,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS profiles_phone_unique
   ON public.profiles (phone) WHERE phone IS NOT NULL AND phone <> '';
 CREATE INDEX IF NOT EXISTS idx_profiles_center ON public.profiles(center_id);
 CREATE INDEX IF NOT EXISTS idx_profiles_student ON public.profiles(student_id);
+
+-- منتجات الباقات الاحترافية (ترقية للقواعد المنشأة سابقاً)
+ALTER TABLE public.center_subscriptions DROP CONSTRAINT IF EXISTS center_subscriptions_plan_type_check;
+ALTER TABLE public.center_subscriptions ADD CONSTRAINT center_subscriptions_plan_type_check
+  CHECK (plan_type IN ('monthly','yearly','custom','trial','center_full','center_medium','solo_teacher'));
 
 -- اشتراكات السناتر (يتحكم بها المطور فقط)
 CREATE TABLE IF NOT EXISTS public.center_subscriptions (
@@ -84,6 +94,148 @@ INSERT INTO public.app_config (key, value) VALUES ('public_config', '{
   "min_app_version": "1.0.0"
 }'::jsonb)
 ON CONFLICT (key) DO NOTHING;
+
+-- ============================================================================
+-- ١-ب) جداول الموقع المشتركة (تثبيت على قاعدة جديدة فارغة)
+--     على قاعدة فيها جداول موقع قائمة يتخطى IF NOT EXISTS كل ما هو موجود
+--     ولا يُمس أي شيء؛ وعلى قاعدة جديدة تُنشأ الجداول هنا كاملة ثم يضيف
+--     القسم التالي عمود center_id لها. المعرفات نصية (TEXT) لأن التطبيق
+--     يولّدها نصياً — مطابقة لاستخدامات src/lib/api.ts و types.ts.
+-- ============================================================================
+
+-- الصفوف الدراسية (grades)
+CREATE TABLE IF NOT EXISTS public.grades (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  academic_year TEXT NOT NULL DEFAULT '',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- المجموعات (groups)
+CREATE TABLE IF NOT EXISTS public.groups (
+  id             TEXT PRIMARY KEY,
+  grade_id       TEXT,
+  name           TEXT NOT NULL,
+  days           TEXT[] NOT NULL DEFAULT '{}',
+  start_time     TEXT NOT NULL DEFAULT '',
+  end_time       TEXT NOT NULL DEFAULT '',
+  monthly_fee    NUMERIC NOT NULL DEFAULT 0,
+  students_count INT NOT NULL DEFAULT 0,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- الطلاب (students)
+CREATE TABLE IF NOT EXISTS public.students (
+  id             TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  phone          TEXT,
+  guardian_phone TEXT,
+  email          TEXT,
+  grade_id       TEXT,
+  group_id       TEXT,
+  status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','archived')),
+  notes          TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- المستحقات الشهرية (dues)
+CREATE TABLE IF NOT EXISTS public.dues (
+  id         TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL,
+  group_id   TEXT,
+  month      INT NOT NULL,
+  year       INT NOT NULL,
+  amount     NUMERIC NOT NULL DEFAULT 0,
+  status     TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','partial')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- المدفوعات (payments)
+CREATE TABLE IF NOT EXISTS public.payments (
+  id           TEXT PRIMARY KEY,
+  student_id   TEXT NOT NULL,
+  due_id       TEXT,
+  amount       NUMERIC NOT NULL DEFAULT 0,
+  payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  month        INT NOT NULL,
+  year         INT NOT NULL,
+  notes        TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- الحصص (sessions)
+CREATE TABLE IF NOT EXISTS public.sessions (
+  id           TEXT PRIMARY KEY,
+  group_id     TEXT NOT NULL,
+  session_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  start_time   TEXT NOT NULL DEFAULT '',
+  end_time     TEXT NOT NULL DEFAULT '',
+  notes        TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- الحضور (attendance) — سجل واحد لكل طالب في الحصة
+CREATE TABLE IF NOT EXISTS public.attendance (
+  id           TEXT PRIMARY KEY,
+  session_id   TEXT NOT NULL,
+  student_id   TEXT NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN ('present','absent','late')),
+  late_minutes INT,
+  notes        TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (session_id, student_id)
+);
+
+-- الدرجات اليدوية / التقييمات (manual_grades)
+CREATE TABLE IF NOT EXISTS public.manual_grades (
+  id         TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL,
+  grade_id   TEXT,
+  group_id   TEXT,
+  title      TEXT NOT NULL,
+  score      NUMERIC NOT NULL DEFAULT 0,
+  max_score  NUMERIC NOT NULL DEFAULT 0,
+  month      INT NOT NULL,
+  year       INT NOT NULL,
+  notes      TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- الإعلانات (announcements)
+CREATE TABLE IF NOT EXISTS public.announcements (
+  id         TEXT PRIMARY KEY,
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  pinned     BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- موارد الموقع العامة القديمة (لا يستخدمها التطبيق — تبقى لترقية الموقع لاحقاً)
+CREATE TABLE IF NOT EXISTS public.exams (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL DEFAULT '',
+  details    TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.honorees (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL DEFAULT '',
+  details    TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.shared_files (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL DEFAULT '',
+  file_url   TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.important_links (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL DEFAULT '',
+  url        TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- ============================================================================
 -- ٢) توسيع جداول الموقع الحالية بعمود center_id (لا يمس البيانات الحالية)
@@ -174,16 +326,16 @@ $$;
 -- ٤) دوال RPC الخاصة بالتسجيل والدخول (تُستدعى من التطبيق)
 -- ============================================================================
 
--- البحث عن سنتر بالكود — متاح للزائر قبل التسجيل (يعرض الاسم واسم المسئول فقط)
+-- البحث عن سنتر بالكود — متاح للزائر قبل التسجيل (الاسم + المسئول + الحالة فقط)
+DROP FUNCTION IF EXISTS public.lookup_center_by_code(TEXT);
 CREATE OR REPLACE FUNCTION public.lookup_center_by_code(p_code TEXT)
-RETURNS TABLE(id UUID, name TEXT, owner_name TEXT)
+RETURNS TABLE(id UUID, name TEXT, owner_name TEXT, status TEXT)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
 BEGIN
   RETURN QUERY
-  SELECT c.id, c.name, c.owner_name
+  SELECT c.id, c.name, c.owner_name, c.status
   FROM public.centers c
   WHERE upper(trim(c.code)) = upper(trim(p_code))
-    AND c.status = 'active'
   LIMIT 1;
 END;
 $$;
@@ -209,15 +361,18 @@ BEGIN
 END;
 $$;
 
--- إتمام تسجيل صاحب سنتر جديد: ينشئ السنتر + الملف + اشتراكاً تجريبياً ٣٠ يوماً
+-- إتمام تسجيل صاحب سنتر جديد: ينشئ السنتر + الملف + اشتراكاً تجريبياً ٧ أيام
+-- p_kind: 'center' (سنتر متكامل) أو 'solo' (مدرس خصوصي مستقل بلا مدرسين تابعين)
+DROP FUNCTION IF EXISTS public.complete_center_registration(TEXT, TEXT, TEXT, TEXT);
 CREATE OR REPLACE FUNCTION public.complete_center_registration(
-  p_center_name TEXT, p_code TEXT, p_owner_name TEXT, p_phone TEXT
+  p_center_name TEXT, p_code TEXT, p_owner_name TEXT, p_phone TEXT, p_kind TEXT DEFAULT 'center'
 ) RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   v_uid UUID := auth.uid();
   v_email TEXT;
   v_center_id UUID;
   v_code TEXT := upper(regexp_replace(trim(p_code), '\s+', '', 'g'));
+  v_kind TEXT := lower(trim(p_kind));
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
   IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_uid) THEN
@@ -226,12 +381,13 @@ BEGIN
   IF char_length(v_code) < 3 OR char_length(v_code) > 8 THEN
     RAISE EXCEPTION 'invalid_code_format';
   END IF;
+  IF v_kind NOT IN ('center', 'solo') THEN v_kind := 'center'; END IF;
   SELECT email INTO v_email FROM auth.users WHERE id = v_uid;
 
   -- الكود فريد: أي تشابه يرفض العملية برسالة «الكود غير متاح»
   BEGIN
-    INSERT INTO public.centers (name, code, owner_name, owner_email, owner_phone)
-    VALUES (trim(p_center_name), v_code, trim(p_owner_name), v_email, nullif(trim(p_phone), ''))
+    INSERT INTO public.centers (name, code, owner_name, owner_email, owner_phone, kind)
+    VALUES (trim(p_center_name), v_code, trim(p_owner_name), v_email, nullif(trim(p_phone), ''), v_kind)
     RETURNING id INTO v_center_id;
   EXCEPTION WHEN unique_violation THEN
     RAISE EXCEPTION 'center_code_taken';
@@ -245,48 +401,17 @@ BEGIN
     RAISE EXCEPTION 'phone_taken';
   END;
 
-  -- اشتراك تجريبي شهري يبدأ فوراً — والمطور يعدّله من لوحته متى شاء
+  -- اشتراك تجريبي ٧ أيام بمزايا كاملة — بعده يطلب السنتر الترقية من المطور
   INSERT INTO public.center_subscriptions (center_id, plan_type, starts_on, ends_on, status, notes)
-  VALUES (v_center_id, 'monthly', CURRENT_DATE, CURRENT_DATE + 30, 'active', 'اشتراك تجريبي عند التسجيل');
+  VALUES (v_center_id, 'trial', CURRENT_DATE, CURRENT_DATE + 7, 'active', 'اشتراك تجريبي عند التسجيل');
 
   RETURN v_center_id;
 END;
 $$;
 
 -- إتمام تسجيل طالب جديد: يتحقق من السنتر ويربط الحساب بسجل الطالب تلقائياً
-CREATE OR REPLACE FUNCTION public.complete_student_registration(
-  p_center_id UUID, p_full_name TEXT, p_phone TEXT, p_guardian_phone TEXT DEFAULT ''
-) RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  v_uid UUID := auth.uid();
-  v_email TEXT;
-  v_student_id TEXT := gen_random_uuid()::text;
-  v_status TEXT;
-  v_now TEXT := to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
-BEGIN
-  IF v_uid IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
-  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_uid) THEN
-    RAISE EXCEPTION 'already_registered';
-  END IF;
-  SELECT status INTO v_status FROM public.centers WHERE id = p_center_id;
-  IF v_status IS NULL THEN RAISE EXCEPTION 'center_not_found'; END IF;
-  IF v_status <> 'active' THEN RAISE EXCEPTION 'center_suspended'; END IF;
-  SELECT email INTO v_email FROM auth.users WHERE id = v_uid;
-
-  INSERT INTO public.students (id, name, phone, guardian_phone, email, status, center_id, created_at, updated_at)
-  VALUES (v_student_id, trim(p_full_name), nullif(trim(p_phone), ''), nullif(trim(p_guardian_phone), ''), v_email, 'active', p_center_id, v_now, v_now);
-
-  BEGIN
-    INSERT INTO public.profiles (id, role, center_id, student_id, full_name, email, phone)
-    VALUES (v_uid, 'student', p_center_id, v_student_id, trim(p_full_name), v_email, nullif(trim(p_phone), ''));
-  EXCEPTION WHEN unique_violation THEN
-    DELETE FROM public.students WHERE id = v_student_id;
-    RAISE EXCEPTION 'phone_taken';
-  END;
-
-  RETURN v_student_id;
-END;
-$$;
+-- ملاحظة: التعريف الفعلي لـ complete_student_registration (بوابة التسجيل + ربط بسجل موجود)
+-- موجود لاحقاً في قسم ٦/ج ويحل محل أي تعريف سابق — لا تكرره هنا.
 
 -- حالة اشتراك سنتر المستخدم الحالي (تُستدعى عند كل تشغيل)
 CREATE OR REPLACE FUNCTION public.get_my_subscription()
@@ -352,6 +477,7 @@ CREATE TRIGGER trg_guard_center_code BEFORE UPDATE ON public.centers
   FOR EACH ROW EXECUTE FUNCTION public.guard_center_code();
 
 -- حماية الهوية: الصلاحية والسنتر وربط الطالب لا يغيّرها إلا المطور
+-- (يُستبدل لاحقاً في قسم ٦/هـ بنسخة تستثني إدارة المسئول لفريقه)
 CREATE OR REPLACE FUNCTION public.guard_profile_identity()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
@@ -371,18 +497,19 @@ CREATE TRIGGER trg_guard_profile_identity BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.guard_profile_identity();
 
 -- مزامنة عدد طلاب المجموعة تلقائياً
+-- (يُستبدل لاحقاً في قسم ٦/هـ بنسخة تشمل العضويات الإضافية)
 CREATE OR REPLACE FUNCTION public.sync_group_student_count()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
   IF TG_OP IN ('INSERT', 'UPDATE') AND NEW.group_id IS NOT NULL THEN
     UPDATE public.groups
        SET students_count = (SELECT count(*) FROM public.students s WHERE s.group_id = NEW.group_id AND s.status = 'active')
-     WHERE id = NEW.group_id;
+      WHERE id = NEW.group_id;
   END IF;
   IF TG_OP IN ('DELETE', 'UPDATE') AND OLD.group_id IS NOT NULL THEN
     UPDATE public.groups
        SET students_count = (SELECT count(*) FROM public.students s WHERE s.group_id = OLD.group_id AND s.status = 'active')
-     WHERE id = OLD.group_id;
+      WHERE id = OLD.group_id;
   END IF;
   RETURN COALESCE(NEW, OLD);
 END;
@@ -622,20 +749,844 @@ DROP POLICY IF EXISTS "important_links_public_legacy_read" ON public.important_l
 CREATE POLICY "important_links_public_legacy_read" ON public.important_links FOR SELECT TO anon
   USING (center_id IS NULL);
 
+-- ---------- قراءة الطالب لمحتوى سنتره (شرف/ملفات/روابط) ----------
+DROP POLICY IF EXISTS "honorees_member_read" ON public.honorees;
+CREATE POLICY "honorees_member_read" ON public.honorees FOR SELECT TO authenticated
+  USING (center_id IS NOT NULL AND center_id = public.my_center_id());
+DROP POLICY IF EXISTS "shared_files_member_read" ON public.shared_files;
+CREATE POLICY "shared_files_member_read" ON public.shared_files FOR SELECT TO authenticated
+  USING (center_id IS NOT NULL AND center_id = public.my_center_id());
+DROP POLICY IF EXISTS "important_links_member_read" ON public.important_links;
+CREATE POLICY "important_links_member_read" ON public.important_links FOR SELECT TO authenticated
+  USING (center_id IS NOT NULL AND center_id = public.my_center_id());
+
+-- ============================================================================
+-- ٦/ب) توسعة الأقسام الجديدة: اختبارات/طلبات/استبيانات/إعدادات سنتر/تسعير
+--  كلها متعددة السناتر بـ center_id + نفس نموذج العزل المعتمد أعلاه.
+--  ملاحظة أمنية: أسئلة الامتحان تُقرأ عبر RPC فقط (get_published_exams) حتى
+--  لا يرى الطالب مصفوفة الإجابات الصحيحة المخزنة في نفس الصف.
+-- ============================================================================
+
+-- الاختبارات الإلكترونية (اختيار من متعدد بتصحيح تلقائي)
+CREATE TABLE IF NOT EXISTS public.app_exams (
+  id               TEXT PRIMARY KEY,
+  center_id        UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  title            TEXT NOT NULL DEFAULT '',
+  subject          TEXT NOT NULL DEFAULT '',
+  grade_id         TEXT,
+  duration_minutes INT NOT NULL DEFAULT 30,
+  questions        JSONB NOT NULL DEFAULT '[]',
+  answers          JSONB NOT NULL DEFAULT '[]',
+  total_score      NUMERIC NOT NULL DEFAULT 0,
+  is_published     BOOLEAN NOT NULL DEFAULT false,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.app_exam_attempts (
+  id         TEXT PRIMARY KEY,
+  center_id  UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  exam_id    TEXT NOT NULL,
+  student_id TEXT NOT NULL,
+  answers    JSONB NOT NULL DEFAULT '[]',
+  score      NUMERIC NOT NULL DEFAULT 0,
+  max_score  NUMERIC NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (exam_id, student_id)
+);
+
+-- الطلبات والاستفسارات (سؤال/نقل مجموعة/تسجيل + رد الإدارة)
+CREATE TABLE IF NOT EXISTS public.app_inquiries (
+  id         TEXT PRIMARY KEY,
+  center_id  UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  student_id TEXT,
+  kind       TEXT NOT NULL DEFAULT 'question' CHECK (kind IN ('question','transfer','registration','other')),
+  subject    TEXT NOT NULL DEFAULT '',
+  body       TEXT NOT NULL DEFAULT '',
+  status     TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','answered','approved','rejected','closed')),
+  reply      TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- الاستبيانات وردود الطلاب (رد واحد لكل طالب)
+CREATE TABLE IF NOT EXISTS public.app_surveys (
+  id         TEXT PRIMARY KEY,
+  center_id  UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  title      TEXT NOT NULL DEFAULT '',
+  questions  JSONB NOT NULL DEFAULT '[]',
+  is_active  BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.app_survey_responses (
+  id         TEXT PRIMARY KEY,
+  center_id  UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  survey_id  TEXT NOT NULL,
+  student_id TEXT NOT NULL,
+  answers    JSONB NOT NULL DEFAULT '[]',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (survey_id, student_id)
+);
+
+-- إعدادات السنتر التشغيلية (واتساب/فتح التسجيل/سنة الأرشيف...)
+CREATE TABLE IF NOT EXISTS public.center_settings (
+  center_id  UUID PRIMARY KEY REFERENCES public.centers(id) ON DELETE CASCADE,
+  settings   JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- التسعير المتقدم للمجموعات (شهري/أسبوعي/بالحصة)
+ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS billing_type TEXT NOT NULL DEFAULT 'monthly'
+  CHECK (billing_type IN ('monthly','weekly','per_session'));
+ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS weekly_price NUMERIC NOT NULL DEFAULT 0;
+ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS session_price NUMERIC NOT NULL DEFAULT 0;
+
+-- رمز الدفع للإشعارات الفورية (Expo Push) — يُسجل من التطبيق عند الدخول
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS push_token TEXT;
+
+-- مدرس المجموعة (مرحلة أولى: اسم ورقم للعرض والفلترة — حسابات المدرسين بصلاحيات لاحقاً)
+ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS teacher_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS teacher_phone TEXT;
+
+-- ربط التكريم بسجل طالب ومجموعة (مع بقاء الاسم الحر للصفوف القديمة)
+ALTER TABLE public.honorees ADD COLUMN IF NOT EXISTS student_id TEXT;
+ALTER TABLE public.honorees ADD COLUMN IF NOT EXISTS group_id TEXT;
+-- حالة مراجعة المحاولة (المقالي يحتاج تصحيح المعلم يدوياً)
+ALTER TABLE public.app_exam_attempts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'graded'
+  CHECK (status IN ('graded','pending_review'));
+
+CREATE INDEX IF NOT EXISTS idx_app_exams_center      ON public.app_exams(center_id);
+CREATE INDEX IF NOT EXISTS idx_app_attempts_exam     ON public.app_exam_attempts(exam_id);
+CREATE INDEX IF NOT EXISTS idx_app_attempts_student  ON public.app_exam_attempts(student_id);
+CREATE INDEX IF NOT EXISTS idx_app_inquiries_center  ON public.app_inquiries(center_id);
+CREATE INDEX IF NOT EXISTS idx_app_inquiries_status  ON public.app_inquiries(center_id, status);
+CREATE INDEX IF NOT EXISTS idx_app_surveys_center    ON public.app_surveys(center_id);
+CREATE INDEX IF NOT EXISTS idx_app_responses_survey  ON public.app_survey_responses(survey_id);
+
+ALTER TABLE public.app_exams           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_exam_attempts   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_inquiries       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_surveys         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_survey_responses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.center_settings     ENABLE ROW LEVEL SECURITY;
+
+-- ---------- app_exams (الطالب يقرأ عبر RPC فقط — بلا سياسة قراءة له) ----------
+DROP POLICY IF EXISTS "app_exams_admin_all" ON public.app_exams;
+CREATE POLICY "app_exams_admin_all" ON public.app_exams FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.center_is_active(center_id));
+
+-- ---------- app_exam_attempts ----------
+DROP POLICY IF EXISTS "app_attempts_admin_all" ON public.app_exam_attempts;
+CREATE POLICY "app_attempts_admin_all" ON public.app_exam_attempts FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS "app_attempts_self_read" ON public.app_exam_attempts;
+CREATE POLICY "app_attempts_self_read" ON public.app_exam_attempts FOR SELECT TO authenticated
+  USING (student_id = public.my_student_id());
+-- ملاحظة أمنية: بلا سياسة إدخال مباشر للطالب في المحاولات عمداً —
+-- كل التسليمات تمر عبر submit_exam_attempt (تصحيح خادمي + منع تكرار)،
+-- وهي SECURITY DEFINER فلا تحتاج سياسة. نحذفها إن وُجدت من نشر سابق:
+DROP POLICY IF EXISTS "app_attempts_self_insert" ON public.app_exam_attempts;
+
+-- ---------- app_inquiries ----------
+DROP POLICY IF EXISTS "app_inquiries_admin_all" ON public.app_inquiries;
+CREATE POLICY "app_inquiries_admin_all" ON public.app_inquiries FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS "app_inquiries_self_read" ON public.app_inquiries;
+CREATE POLICY "app_inquiries_self_read" ON public.app_inquiries FOR SELECT TO authenticated
+  USING (student_id = public.my_student_id());
+DROP POLICY IF EXISTS "app_inquiries_self_insert" ON public.app_inquiries;
+CREATE POLICY "app_inquiries_self_insert" ON public.app_inquiries FOR INSERT TO authenticated
+  WITH CHECK (student_id = public.my_student_id()
+              AND center_id = public.my_center_id()
+              AND status = 'pending'
+              AND public.center_is_active(center_id));
+
+-- ---------- app_surveys ----------
+DROP POLICY IF EXISTS "app_surveys_admin_all" ON public.app_surveys;
+CREATE POLICY "app_surveys_admin_all" ON public.app_surveys FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS "app_surveys_member_read" ON public.app_surveys;
+CREATE POLICY "app_surveys_member_read" ON public.app_surveys FOR SELECT TO authenticated
+  USING (center_id IS NOT NULL AND center_id = public.my_center_id() AND is_active = true);
+
+-- ---------- app_survey_responses ----------
+DROP POLICY IF EXISTS "app_responses_admin_all" ON public.app_survey_responses;
+CREATE POLICY "app_responses_admin_all" ON public.app_survey_responses FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS "app_responses_self_read" ON public.app_survey_responses;
+CREATE POLICY "app_responses_self_read" ON public.app_survey_responses FOR SELECT TO authenticated
+  USING (student_id = public.my_student_id());
+DROP POLICY IF EXISTS "app_responses_self_insert" ON public.app_survey_responses;
+CREATE POLICY "app_responses_self_insert" ON public.app_survey_responses FOR INSERT TO authenticated
+  WITH CHECK (student_id = public.my_student_id()
+              AND center_id = public.my_center_id()
+              AND public.center_is_active(center_id));
+
+-- ---------- center_settings (المسئول يدير سنتره، والطالب يقرأ سنتره) ----------
+DROP POLICY IF EXISTS "center_settings_admin_all" ON public.center_settings;
+CREATE POLICY "center_settings_admin_all" ON public.center_settings FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS "center_settings_member_read" ON public.center_settings;
+CREATE POLICY "center_settings_member_read" ON public.center_settings FOR SELECT TO authenticated
+  USING (center_id = public.my_center_id());
+
+-- ============================================================================
+-- ٦/ج) دوال الامتحانات + بوابة التسجيل + ربط حساب الطالب بسجله الموجود
+-- ============================================================================
+
+-- الامتحانات المنشورة لسنتر الطالب (بلا الإجابات الصحيحة) + هل حاولها؟
+CREATE OR REPLACE FUNCTION public.get_published_exams()
+RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_center UUID := public.my_center_id();
+  v_sid TEXT := public.my_student_id();
+BEGIN
+  IF v_center IS NULL OR v_sid IS NULL THEN RETURN '[]'::jsonb; END IF;
+  RETURN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', e.id, 'title', e.title, 'subject', e.subject, 'grade_id', e.grade_id,
+      'duration_minutes', e.duration_minutes, 'total_score', e.total_score,
+      'questions', e.questions, 'created_at', e.created_at,
+      'attempted', EXISTS(SELECT 1 FROM public.app_exam_attempts a WHERE a.exam_id = e.id AND a.student_id = v_sid)
+    ) ORDER BY e.created_at DESC)
+    FROM public.app_exams e
+    WHERE e.center_id = v_center AND e.is_published
+  ), '[]'::jsonb);
+END;
+$$;
+
+-- تسليم إجابة امتحان: تصحيح تلقائي (اختياري/صح-خطأ بدرجات) + المقالي للمراجعة
+-- أنواع الأسئلة: mcq (اختيار من 4) · tf (صح/خطأ) · essay (مقالي — قيد مراجعة المعلم)
+CREATE OR REPLACE FUNCTION public.submit_exam_attempt(p_exam_id TEXT, p_answers JSONB)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_center UUID := public.my_center_id();
+  v_sid TEXT := public.my_student_id();
+  v_exam public.app_exams%ROWTYPE;
+  v_n INT := 0;
+  v_total_marks NUMERIC := 0;
+  v_earned NUMERIC := 0;
+  v_correct INT := 0;
+  v_has_essay BOOLEAN := false;
+  v_status TEXT;
+  i INT;
+  v_q JSONB;
+  v_type TEXT;
+  v_marks NUMERIC;
+BEGIN
+  IF v_center IS NULL OR v_sid IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+  SELECT * INTO v_exam FROM public.app_exams
+   WHERE id = p_exam_id AND center_id = v_center AND is_published;
+  IF NOT FOUND THEN RAISE EXCEPTION 'exam_not_found'; END IF;
+  IF EXISTS (SELECT 1 FROM public.app_exam_attempts WHERE exam_id = p_exam_id AND student_id = v_sid) THEN
+    RAISE EXCEPTION 'already_attempted';
+  END IF;
+  v_n := COALESCE(jsonb_array_length(v_exam.questions), 0);
+  FOR i IN 0..v_n - 1 LOOP
+    v_q := v_exam.questions -> i;
+    v_type := COALESCE(v_q ->> 'type', 'mcq');
+    v_marks := COALESCE(NULLIF(v_q ->> 'marks', '')::NUMERIC, 1);
+    v_total_marks := v_total_marks + v_marks;
+    IF v_type = 'essay' THEN
+      v_has_essay := true;
+    ELSIF (v_exam.answers -> i) IS NOT NULL
+      AND (v_exam.answers -> i) = (COALESCE(p_answers, '[]'::jsonb) -> i) THEN
+      v_correct := v_correct + 1;
+      v_earned := v_earned + v_marks;
+    END IF;
+  END LOOP;
+  IF v_total_marks <= 0 THEN v_total_marks := COALESCE(v_exam.total_score, 0); END IF;
+  v_status := CASE WHEN v_has_essay THEN 'pending_review' ELSE 'graded' END;
+  INSERT INTO public.app_exam_attempts (id, center_id, exam_id, student_id, answers, score, max_score, status)
+  VALUES (gen_random_uuid()::text, v_center, p_exam_id, v_sid, COALESCE(p_answers, '[]'::jsonb),
+          ROUND(v_earned, 2), v_total_marks, v_status);
+  RETURN jsonb_build_object('score', ROUND(v_earned, 2), 'max_score', v_total_marks,
+                            'correct', v_correct, 'total', v_n, 'status', v_status);
+END;
+$$;
+
+-- إتمام تسجيل طالب: بوابة التسجيل + ربط الحساب بسجل طالب موجود بنفس الهاتف
+-- (الصف والمجموعة اختياريان من قوائم السنتر ويُتحقق أنهما يخصانه)
+DROP FUNCTION IF EXISTS public.complete_student_registration(UUID, TEXT, TEXT, TEXT);
+CREATE OR REPLACE FUNCTION public.complete_student_registration(
+  p_center_id UUID, p_full_name TEXT, p_phone TEXT, p_guardian_phone TEXT DEFAULT '',
+  p_grade_id TEXT DEFAULT NULL, p_group_id TEXT DEFAULT NULL
+) RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+  v_email TEXT;
+  v_student_id TEXT := gen_random_uuid()::text;
+  v_created BOOLEAN := true;
+  v_existing_id TEXT;
+  v_phone TEXT := nullif(trim(p_phone), '');
+  v_status TEXT;
+  v_now TIMESTAMPTZ := now();
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_uid) THEN
+    RAISE EXCEPTION 'already_registered';
+  END IF;
+  SELECT status INTO v_status FROM public.centers WHERE id = p_center_id;
+  IF v_status IS NULL THEN RAISE EXCEPTION 'center_not_found'; END IF;
+  IF v_status <> 'active' THEN RAISE EXCEPTION 'center_suspended'; END IF;
+  IF EXISTS (SELECT 1 FROM public.center_settings
+             WHERE center_id = p_center_id AND (settings ->> 'registration_open') = 'false') THEN
+    RAISE EXCEPTION 'registration_closed';
+  END IF;
+  IF p_grade_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.grades WHERE id = p_grade_id AND center_id = p_center_id) THEN
+    RAISE EXCEPTION 'invalid_grade';
+  END IF;
+  IF p_group_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.groups WHERE id = p_group_id AND center_id = p_center_id) THEN
+    RAISE EXCEPTION 'invalid_group';
+  END IF;
+  IF v_phone IS NOT NULL AND v_phone = nullif(trim(p_guardian_phone), '') THEN
+    RAISE EXCEPTION 'same_guardian_phone';
+  END IF;
+  SELECT email INTO v_email FROM auth.users WHERE id = v_uid;
+
+  -- طالب أُضيف يدوياً بنفس الهاتف وبلا حساب مرتبط؟ نربط حسابه بسجله بدل التكرار
+  IF v_phone IS NOT NULL THEN
+    SELECT s.id INTO v_existing_id FROM public.students s
+     WHERE s.center_id = p_center_id AND s.phone = v_phone
+       AND NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.student_id = s.id)
+     LIMIT 1;
+  END IF;
+  IF v_existing_id IS NOT NULL THEN
+    UPDATE public.students SET name = trim(p_full_name),
+      guardian_phone = nullif(trim(p_guardian_phone), ''), email = v_email,
+      grade_id = COALESCE(p_grade_id, grade_id), group_id = COALESCE(p_group_id, group_id),
+      updated_at = v_now
+     WHERE id = v_existing_id;
+    v_student_id := v_existing_id;
+    v_created := false;
+  ELSE
+    -- سقف الحساب المنفرد: 200 طالب نشط كحد أقصى
+    IF (SELECT kind FROM public.centers WHERE id = p_center_id) = 'solo'
+       AND (SELECT count(*) FROM public.students WHERE center_id = p_center_id AND status = 'active') >= 200 THEN
+      RAISE EXCEPTION 'students_limit_reached';
+    END IF;
+    INSERT INTO public.students (id, name, phone, guardian_phone, email, status, center_id, grade_id, group_id, created_at, updated_at)
+    VALUES (v_student_id, trim(p_full_name), v_phone, nullif(trim(p_guardian_phone), ''), v_email, 'active', p_center_id, p_grade_id, p_group_id, v_now, v_now);
+  END IF;
+
+  BEGIN
+    INSERT INTO public.profiles (id, role, center_id, student_id, full_name, email, phone)
+    VALUES (v_uid, 'student', p_center_id, v_student_id, trim(p_full_name), v_email, v_phone);
+  EXCEPTION WHEN unique_violation THEN
+    IF v_created THEN
+      DELETE FROM public.students WHERE id = v_student_id;
+    END IF;
+    RAISE EXCEPTION 'phone_taken';
+  END;
+
+  RETURN v_student_id;
+END;
+$$;
+
 -- ============================================================================
 -- ٧) صلاحيات تنفيذ الدوال
 -- ============================================================================
 GRANT EXECUTE ON FUNCTION public.lookup_center_by_code(TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.check_registration_availability(TEXT, TEXT) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.complete_center_registration(TEXT, TEXT, TEXT, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.complete_student_registration(UUID, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.complete_center_registration(TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.complete_student_registration(UUID, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_my_subscription() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_published_exams() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_exam_attempt(TEXT, JSONB) TO authenticated;
+
+-- قوائم سنتر العامة للتسجيل (أسماء الصفوف والمجموعات فقط — للزائر قبل إنشاء الحساب)
+CREATE OR REPLACE FUNCTION public.get_center_signup_lists(p_center_id UUID)
+RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM public.centers WHERE id = p_center_id AND status = 'active') THEN
+    RETURN jsonb_build_object('grades', '[]'::jsonb, 'groups', '[]'::jsonb);
+  END IF;
+  RETURN jsonb_build_object(
+    'grades', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'name', name)) FROM public.grades WHERE center_id = p_center_id), '[]'::jsonb),
+    'groups', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'name', name, 'grade_id', grade_id)) FROM public.groups WHERE center_id = p_center_id), '[]'::jsonb)
+  );
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.get_center_signup_lists(UUID) TO anon, authenticated;
+
+-- ============================================================================
+-- ٦/د) الإشعارات الداخلية: صف واحد لكل رسالة مهما كان عدد المستلمين (موفرة)،
+-- والطالب يقرأ عبر RPC مفلتر فقط — بلا قراءة مباشرة للجدول.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.app_notifications (
+  id          TEXT PRIMARY KEY,
+  center_id   UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  audience    TEXT NOT NULL DEFAULT 'all' CHECK (audience IN ('all','grade','group','student','owners')),
+  audience_id TEXT,
+  title       TEXT NOT NULL DEFAULT '',
+  body        TEXT NOT NULL DEFAULT '',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.app_notification_reads (
+  id              TEXT PRIMARY KEY,
+  center_id       UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  notification_id TEXT NOT NULL,
+  student_id      TEXT NOT NULL,
+  read_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (notification_id, student_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_notif_center  ON public.app_notifications(center_id);
+CREATE INDEX IF NOT EXISTS idx_app_reads_notif   ON public.app_notification_reads(notification_id);
+
+-- ترقية قيد الجمهور للقواعد المنشأة سابقاً (قناة owners الجديدة)
+ALTER TABLE public.app_notifications DROP CONSTRAINT IF EXISTS app_notifications_audience_check;
+ALTER TABLE public.app_notifications ADD CONSTRAINT app_notifications_audience_check
+  CHECK (audience IN ('all','grade','group','student','owners'));
+
+ALTER TABLE public.app_notifications      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_notification_reads ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "app_notif_admin_all" ON public.app_notifications;
+CREATE POLICY "app_notif_admin_all" ON public.app_notifications FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.center_is_active(center_id));
+
+DROP POLICY IF EXISTS "app_reads_admin_all" ON public.app_notification_reads;
+CREATE POLICY "app_reads_admin_all" ON public.app_notification_reads FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS "app_reads_self_read" ON public.app_notification_reads;
+CREATE POLICY "app_reads_self_read" ON public.app_notification_reads FOR SELECT TO authenticated
+  USING (student_id = public.my_student_id());
+DROP POLICY IF EXISTS "app_reads_self_insert" ON public.app_notification_reads;
+CREATE POLICY "app_reads_self_insert" ON public.app_notification_reads FOR INSERT TO authenticated
+  WITH CHECK (student_id = public.my_student_id()
+              AND center_id = public.my_center_id()
+              AND public.center_is_active(center_id));
+-- قناة المطور↔أصحاب السناتر: المسئول يقرأ إشعارات owners لسنتره ويعلّمها بمعرفه (uid)
+DROP POLICY IF EXISTS "app_reads_owner_read" ON public.app_notification_reads;
+CREATE POLICY "app_reads_owner_read" ON public.app_notification_reads FOR SELECT TO authenticated
+  USING (center_id = public.my_center_id() AND student_id = (auth.uid())::text);
+DROP POLICY IF EXISTS "app_reads_owner_insert" ON public.app_notification_reads;
+CREATE POLICY "app_reads_owner_insert" ON public.app_notification_reads FOR INSERT TO authenticated
+  WITH CHECK (public.my_role() = 'center_admin'
+              AND center_id = public.my_center_id()
+              AND student_id = (auth.uid())::text
+              AND public.center_is_active(center_id));
+
+-- إشعارات الطالب مفلترة خادمياً (حسب سجله: الكل/صفه/مجموعته/هو) + هل قرأها؟
+CREATE OR REPLACE FUNCTION public.get_my_notifications()
+RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_center UUID := public.my_center_id();
+  v_sid TEXT := public.my_student_id();
+  v_grade TEXT;
+  v_group TEXT;
+BEGIN
+  IF v_center IS NULL OR v_sid IS NULL THEN RETURN '[]'::jsonb; END IF;
+  SELECT grade_id, group_id INTO v_grade, v_group FROM public.students WHERE id = v_sid;
+  RETURN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', n.id, 'title', n.title, 'body', n.body, 'created_at', n.created_at,
+      'is_read', EXISTS(SELECT 1 FROM public.app_notification_reads r
+                        WHERE r.notification_id = n.id AND r.student_id = v_sid)
+    ) ORDER BY n.created_at DESC)
+    FROM public.app_notifications n
+    WHERE n.center_id = v_center
+      AND (n.audience = 'all'
+        OR (n.audience = 'grade' AND n.audience_id IS NOT NULL AND n.audience_id = v_grade)
+        OR (n.audience = 'group' AND n.audience_id IS NOT NULL AND n.audience_id = v_group)
+        OR (n.audience = 'student' AND n.audience_id = v_sid))
+    LIMIT 100
+  ), '[]'::jsonb);
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.get_my_notifications() TO authenticated;
+
+-- ============================================================================
+-- ٦/و) الباقات: طلبات الترقية + سجل المعاملات + سجل العمليات
+-- ----------------------------------------------------------------------------
+-- • subscription_requests: طلب ترقية من المالك (خطة + مدة + مبلغ + تحويل)
+--   يعتمدها المطور فينشأ الاشتراك، وكلاهما مسجل في activity_log
+-- • activity_log: سجل عمليات لا يُحذف (من فعل ماذا ومتى) — للسنتر والمطور
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.subscription_requests (
+  id          TEXT PRIMARY KEY,
+  center_id   UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  plan        TEXT NOT NULL,
+  months      INT NOT NULL DEFAULT 1,
+  amount      NUMERIC NOT NULL DEFAULT 0,
+  transfer_at TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+  notes       TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_sub_requests_center ON public.subscription_requests(center_id);
+CREATE INDEX IF NOT EXISTS idx_sub_requests_status ON public.subscription_requests(status);
+
+CREATE TABLE IF NOT EXISTS public.activity_log (
+  id         TEXT PRIMARY KEY,
+  center_id  UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  actor_id   TEXT NOT NULL DEFAULT '',
+  actor_name TEXT NOT NULL DEFAULT '',
+  action     TEXT NOT NULL DEFAULT '',
+  details    TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_activity_center ON public.activity_log(center_id);
+CREATE INDEX IF NOT EXISTS idx_activity_created ON public.activity_log(center_id, created_at);
+
+ALTER TABLE public.subscription_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.activity_log          ENABLE ROW LEVEL SECURITY;
+
+-- طلبات الترقية: المالك يدير طلبات سنتره، والمطور يدير الكل
+DROP POLICY IF EXISTS "subreq_owner_all" ON public.subscription_requests;
+CREATE POLICY "subreq_owner_all" ON public.subscription_requests FOR ALL TO authenticated
+  USING (public.my_role() = 'center_admin' AND center_id = public.my_center_id())
+  WITH CHECK (public.my_role() = 'center_admin' AND center_id = public.my_center_id()
+              AND public.center_is_active(center_id) AND status = 'pending');
+DROP POLICY IF EXISTS "subreq_super_admin" ON public.subscription_requests;
+CREATE POLICY "subreq_super_admin" ON public.subscription_requests FOR ALL TO authenticated
+  USING (public.my_role() = 'super_admin') WITH CHECK (public.my_role() = 'super_admin');
+DROP POLICY IF EXISTS "subreq_legacy" ON public.subscription_requests;
+CREATE POLICY "subreq_legacy" ON public.subscription_requests FOR ALL TO authenticated
+  USING (public.is_legacy_admin()) WITH CHECK (public.is_legacy_admin());
+
+-- سجل العمليات: قراءة للمالك والمطور، وكتابة للفريق المفعّل (يُمنع التعديل والحذف)
+DROP POLICY IF EXISTS "activity_owner_read" ON public.activity_log;
+CREATE POLICY "activity_owner_read" ON public.activity_log FOR SELECT TO authenticated
+  USING (public.my_role() = 'center_admin' AND center_id = public.my_center_id());
+DROP POLICY IF EXISTS "activity_staff_insert" ON public.activity_log;
+CREATE POLICY "activity_staff_insert" ON public.activity_log FOR INSERT TO authenticated
+  WITH CHECK ((public.my_role() = 'center_admin' OR public.teacher_center_ok(center_id))
+              AND center_id = public.my_center_id()
+              AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS "activity_super_admin" ON public.activity_log;
+CREATE POLICY "activity_super_admin" ON public.activity_log FOR ALL TO authenticated
+  USING (public.my_role() = 'super_admin') WITH CHECK (public.my_role() = 'super_admin');
+DROP POLICY IF EXISTS "activity_legacy" ON public.activity_log;
+CREATE POLICY "activity_legacy" ON public.activity_log FOR ALL TO authenticated
+  USING (public.is_legacy_admin()) WITH CHECK (public.is_legacy_admin());
+
+-- ---------- تعميم «المدرس» على كل الفريق (مدرس/مدير/سكرتير) ----------
+CREATE OR REPLACE FUNCTION public.teacher_is_active()
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role IN ('teacher','manager','secretary')
+      AND is_active AND center_id IS NOT NULL
+  );
+$$;
+
+-- ---------- حدود الباقات تُفرض خادمياً عند التفعيل ----------
+CREATE OR REPLACE FUNCTION public.staff_limit_check()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_kind TEXT;
+  v_plan TEXT;
+  v_max INT;
+  v_count INT;
+BEGIN
+  IF NEW.role NOT IN ('teacher','manager','secretary') OR NOT NEW.is_active THEN
+    RETURN NEW;
+  END IF;
+  SELECT kind INTO v_kind FROM public.centers WHERE id = NEW.center_id;
+  SELECT plan_type INTO v_plan FROM public.center_subscriptions
+   WHERE center_id = NEW.center_id ORDER BY ends_on DESC LIMIT 1;
+  IF NEW.role = 'manager' THEN
+    IF v_kind = 'solo' THEN v_max := 0; ELSE v_max := 1; END IF;
+  ELSIF NEW.role = 'secretary' THEN
+    IF v_kind = 'solo' THEN v_max := 0;
+    ELSIF v_plan = 'center_medium' THEN v_max := 1;
+    ELSE v_max := 2; END IF;
+  ELSE
+    IF v_kind = 'solo' THEN v_max := 0;
+    ELSIF v_plan = 'center_medium' THEN v_max := 2;
+    ELSE v_max := 4; END IF;
+  END IF;
+  SELECT count(*) INTO v_count FROM public.profiles
+   WHERE center_id = NEW.center_id AND role = NEW.role AND is_active AND id IS DISTINCT FROM NEW.id;
+  IF v_count >= v_max THEN
+    RAISE EXCEPTION 'staff_limit_reached';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS trg_staff_limit_check ON public.profiles;
+CREATE TRIGGER trg_staff_limit_check
+  BEFORE INSERT OR UPDATE OF role, is_active ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.staff_limit_check();
+
+-- ---------- سقف طلاب الحساب المنفرد: 200 طالب نشط ----------
+-- (يُفحص في دالة التسجيل أدناه عند إنشاء سجل جديد فقط، لا عند الدمج)
+
+-- ============================================================================
+-- ٦/هـ) نظام المدرس التابع + أنواع الحسابات + الطالب متعدد المجموعات
+-- ----------------------------------------------------------------------------
+-- • الدور teacher: يسجَّل بكود السنتر ثم يفعّله المسئول (لا صلاحية قبل التفعيل)
+-- • centers.kind: 'center' (سنتر متكامل) أو 'solo' (مدرس خصوصي مستقل)
+-- • student_groups: انضمام الطالب لأكثر من مجموعة (مواد/مدرسون مختلفون)
+-- • teacher_groups: إسناد المجموعات للمدرس (نطاق عمله في الواجهة)
+-- ============================================================================
+
+-- نوع الحساب: سنتر متكامل أم مدرس خصوصي مستقل
+ALTER TABLE public.centers ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'center'
+  CHECK (kind IN ('center','solo'));
+
+-- صلاحيات المدرس التفصيلية (مفاتيح true/false يتحكم بها المسئول)
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS perms JSONB NOT NULL DEFAULT '{}';
+
+-- ---------- دوال مساعدة للمدرس (قبل السياسات التي تستخدمها) ----------
+-- (التعريف الفعلي لـ teacher_is_active بالأدوار الثلاثة موجود أعلاه — لا تكرره هنا)
+
+CREATE OR REPLACE FUNCTION public.teacher_center_ok(cid UUID)
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT public.teacher_is_active() AND cid IS NOT NULL AND cid = public.my_center_id();
+$$;
+
+-- انضمام الطالب لمجموعات إضافية (بجانب مجموعته الأساسية group_id)
+CREATE TABLE IF NOT EXISTS public.student_groups (
+  student_id TEXT NOT NULL,
+  group_id   TEXT NOT NULL,
+  center_id  UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (student_id, group_id)
+);
+CREATE INDEX IF NOT EXISTS idx_student_groups_group  ON public.student_groups(group_id);
+CREATE INDEX IF NOT EXISTS idx_student_groups_center ON public.student_groups(center_id);
+
+-- إسناد المجموعات للمدرس (نطاق عمله)
+CREATE TABLE IF NOT EXISTS public.teacher_groups (
+  teacher_id TEXT NOT NULL,
+  group_id   TEXT NOT NULL,
+  center_id  UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (teacher_id, group_id)
+);
+CREATE INDEX IF NOT EXISTS idx_teacher_groups_group ON public.teacher_groups(group_id);
+
+ALTER TABLE public.student_groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.teacher_groups  ENABLE ROW LEVEL SECURITY;
+
+-- عدّاد طلاب المجموعة يشمل الأساسية + الإضافية (النشطين فقط)
+CREATE OR REPLACE FUNCTION public.sync_group_student_count()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  gids TEXT[];
+BEGIN
+  gids := ARRAY[]::TEXT[];
+  IF TG_TABLE_NAME = 'student_groups' THEN
+    IF TG_OP IN ('INSERT', 'UPDATE') THEN gids := gids || NEW.group_id; END IF;
+    IF TG_OP IN ('DELETE', 'UPDATE') THEN gids := gids || OLD.group_id; END IF;
+  ELSE
+    IF TG_OP IN ('INSERT', 'UPDATE') AND NEW.group_id IS NOT NULL THEN gids := gids || NEW.group_id; END IF;
+    IF TG_OP IN ('DELETE', 'UPDATE') AND OLD.group_id IS NOT NULL THEN gids := gids || OLD.group_id; END IF;
+  END IF;
+  UPDATE public.groups g SET students_count = (
+    SELECT count(DISTINCT s.id) FROM public.students s
+    WHERE s.status = 'active' AND (
+      s.group_id = g.id OR EXISTS (
+        SELECT 1 FROM public.student_groups sg WHERE sg.student_id = s.id AND sg.group_id = g.id
+      )
+    )
+  ) WHERE g.id = ANY (gids);
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+DROP TRIGGER IF EXISTS trg_sync_group_count ON public.students;
+CREATE TRIGGER trg_sync_group_count
+  AFTER INSERT OR DELETE OR UPDATE OF group_id, status ON public.students
+  FOR EACH ROW EXECUTE FUNCTION public.sync_group_student_count();
+DROP TRIGGER IF EXISTS trg_sync_group_count_junction ON public.student_groups;
+CREATE TRIGGER trg_sync_group_count_junction
+  AFTER INSERT OR DELETE OR UPDATE ON public.student_groups
+  FOR EACH ROW EXECUTE FUNCTION public.sync_group_student_count();
+
+-- ---------- student_groups / teacher_groups: إدارة المسئول + قراءة المدرس لسنتره ----------
+DROP POLICY IF EXISTS "student_groups_admin_all" ON public.student_groups;
+CREATE POLICY "student_groups_admin_all" ON public.student_groups FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS "student_groups_teacher_rw" ON public.student_groups;
+CREATE POLICY "student_groups_teacher_rw" ON public.student_groups FOR ALL TO authenticated
+  USING (public.teacher_center_ok(center_id))
+  WITH CHECK (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "teacher_groups_admin_all" ON public.teacher_groups;
+CREATE POLICY "teacher_groups_admin_all" ON public.teacher_groups FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS "teacher_groups_self_read" ON public.teacher_groups;
+CREATE POLICY "teacher_groups_self_read" ON public.teacher_groups FOR SELECT TO authenticated
+  USING (teacher_id = auth.uid()::text);
+-- الطالب يقرأ عضوياته الإضافية (جدوله وقوائمه تعتمد عليها)
+DROP POLICY IF EXISTS "student_groups_self_read" ON public.student_groups;
+CREATE POLICY "student_groups_self_read" ON public.student_groups FOR SELECT TO authenticated
+  USING (student_id = public.my_student_id());
+
+-- ---------- سياسات المدرس (قراءة سنتره + كتابة حسب صلاحياته في الواجهة) ----------
+-- students/dues/payments: قراءة (التحصيل والتقارير عبر سياسات الكتابة أدناه)
+DROP POLICY IF EXISTS "students_teacher_read" ON public.students;
+CREATE POLICY "students_teacher_read" ON public.students FOR SELECT TO authenticated
+  USING (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "dues_teacher_read" ON public.dues;
+CREATE POLICY "dues_teacher_read" ON public.dues FOR SELECT TO authenticated
+  USING (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "dues_teacher_collect" ON public.dues;
+CREATE POLICY "dues_teacher_collect" ON public.dues FOR UPDATE TO authenticated
+  USING (public.teacher_center_ok(center_id))
+  WITH CHECK (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "payments_teacher_read" ON public.payments;
+CREATE POLICY "payments_teacher_read" ON public.payments FOR SELECT TO authenticated
+  USING (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "payments_teacher_insert" ON public.payments;
+CREATE POLICY "payments_teacher_insert" ON public.payments FOR INSERT TO authenticated
+  WITH CHECK (public.teacher_center_ok(center_id));
+-- الحضور والدرجات: كامل داخل سنتره (الإنشاء/التعديل/الحذف)
+DROP POLICY IF EXISTS "attendance_teacher_all" ON public.attendance;
+CREATE POLICY "attendance_teacher_all" ON public.attendance FOR ALL TO authenticated
+  USING (public.teacher_center_ok(center_id))
+  WITH CHECK (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "sessions_teacher_insert" ON public.sessions;
+CREATE POLICY "sessions_teacher_insert" ON public.sessions FOR INSERT TO authenticated
+  WITH CHECK (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "manual_grades_teacher_all" ON public.manual_grades;
+CREATE POLICY "manual_grades_teacher_all" ON public.manual_grades FOR ALL TO authenticated
+  USING (public.teacher_center_ok(center_id))
+  WITH CHECK (public.teacher_center_ok(center_id));
+-- المحتوى: إعلانات/اختبارات/محاولات/استبيانات/شرف/طلبات (رد فقط للطلبات)
+DROP POLICY IF EXISTS "announcements_teacher_all" ON public.announcements;
+CREATE POLICY "announcements_teacher_all" ON public.announcements FOR ALL TO authenticated
+  USING (public.teacher_center_ok(center_id))
+  WITH CHECK (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "app_exams_teacher_all" ON public.app_exams;
+CREATE POLICY "app_exams_teacher_all" ON public.app_exams FOR ALL TO authenticated
+  USING (public.teacher_center_ok(center_id))
+  WITH CHECK (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "app_attempts_teacher_all" ON public.app_exam_attempts;
+CREATE POLICY "app_attempts_teacher_all" ON public.app_exam_attempts FOR ALL TO authenticated
+  USING (public.teacher_center_ok(center_id))
+  WITH CHECK (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "app_surveys_teacher_all" ON public.app_surveys;
+CREATE POLICY "app_surveys_teacher_all" ON public.app_surveys FOR ALL TO authenticated
+  USING (public.teacher_center_ok(center_id))
+  WITH CHECK (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "app_responses_teacher_read" ON public.app_survey_responses;
+CREATE POLICY "app_responses_teacher_read" ON public.app_survey_responses FOR SELECT TO authenticated
+  USING (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "honorees_teacher_all" ON public.honorees;
+CREATE POLICY "honorees_teacher_all" ON public.honorees FOR ALL TO authenticated
+  USING (public.teacher_center_ok(center_id))
+  WITH CHECK (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "app_inquiries_teacher_reply" ON public.app_inquiries;
+CREATE POLICY "app_inquiries_teacher_reply" ON public.app_inquiries FOR UPDATE TO authenticated
+  USING (public.teacher_center_ok(center_id))
+  WITH CHECK (public.teacher_center_ok(center_id));
+DROP POLICY IF EXISTS "app_notif_teacher_all" ON public.app_notifications;
+CREATE POLICY "app_notif_teacher_all" ON public.app_notifications FOR ALL TO authenticated
+  USING (public.teacher_center_ok(center_id))
+  WITH CHECK (public.teacher_center_ok(center_id));
+
+-- ---------- المسئول يدير حسابات مدرسي سنتره (تفعيل/إيقاف/صلاحيات فقط) ----------
+DROP POLICY IF EXISTS "profiles_teacher_manage" ON public.profiles;
+CREATE POLICY "profiles_teacher_manage" ON public.profiles FOR UPDATE TO authenticated
+  USING (public.my_role() = 'center_admin'
+         AND role IN ('teacher','manager','secretary')
+         AND center_id = public.my_center_id())
+  WITH CHECK (public.my_role() = 'center_admin'
+         AND role IN ('teacher','manager','secretary')
+         AND center_id = public.my_center_id());
+-- حذف حسابات الفريق (مدرس/مدير/سكرتير) بيد المسئول فقط — لا حذف للمالك أو الطلاب
+DROP POLICY IF EXISTS "profiles_staff_delete" ON public.profiles;
+CREATE POLICY "profiles_staff_delete" ON public.profiles FOR DELETE TO authenticated
+  USING (public.my_role() = 'center_admin'
+         AND role IN ('teacher','manager','secretary')
+         AND center_id = public.my_center_id());
+
+-- حماية الهوية: يُستثنى منها المسئول وهو يفعّل/يوقف مدرسي سنتره أو يعدل صلاحياتهم
+CREATE OR REPLACE FUNCTION public.guard_profile_identity()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NOT public.is_legacy_admin() AND public.my_role() IS DISTINCT FROM 'super_admin' THEN
+    IF public.my_role() = 'center_admin'
+       AND OLD.role IN ('teacher','manager','secretary')
+       AND NEW.role IN ('teacher','manager','secretary')
+       AND OLD.center_id IS NOT DISTINCT FROM NEW.center_id
+       AND OLD.center_id = public.my_center_id()
+       AND OLD.student_id IS NOT DISTINCT FROM NEW.student_id THEN
+      RETURN NEW;
+    END IF;
+    IF NEW.role IS DISTINCT FROM OLD.role
+       OR NEW.center_id IS DISTINCT FROM OLD.center_id
+       OR NEW.student_id IS DISTINCT FROM OLD.student_id
+       OR NEW.is_active IS DISTINCT FROM OLD.is_active THEN
+      RAISE EXCEPTION 'identity_protected';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+-- ---------- تسجيل فرد فريق تابع (مدرس/مدير/سكرتير): حساب خامل حتى يفعّله المسئول ----------
+DROP FUNCTION IF EXISTS public.register_teacher_account(UUID, TEXT, TEXT);
+CREATE OR REPLACE FUNCTION public.register_staff_account(
+  p_center_id UUID, p_full_name TEXT, p_phone TEXT, p_role TEXT DEFAULT 'teacher'
+) RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+  v_email TEXT;
+  v_status TEXT;
+  v_kind TEXT;
+  v_role TEXT := lower(trim(p_role));
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_uid) THEN
+    RAISE EXCEPTION 'already_registered';
+  END IF;
+  IF v_role NOT IN ('teacher','manager','secretary') THEN
+    RAISE EXCEPTION 'invalid_role';
+  END IF;
+  SELECT status, kind INTO v_status, v_kind FROM public.centers WHERE id = p_center_id;
+  IF v_status IS NULL THEN RAISE EXCEPTION 'center_not_found'; END IF;
+  IF v_status <> 'active' THEN RAISE EXCEPTION 'center_suspended'; END IF;
+  IF v_kind = 'solo' THEN RAISE EXCEPTION 'staff_not_allowed'; END IF;
+  IF EXISTS (SELECT 1 FROM public.center_settings
+             WHERE center_id = p_center_id AND (settings ->> 'registration_open') = 'false') THEN
+    RAISE EXCEPTION 'registration_closed';
+  END IF;
+  SELECT email INTO v_email FROM auth.users WHERE id = v_uid;
+  BEGIN
+    INSERT INTO public.profiles (id, role, center_id, full_name, email, phone, is_active, perms)
+    VALUES (v_uid, v_role, p_center_id, trim(p_full_name), v_email, nullif(trim(p_phone), ''), false, '{}');
+  EXCEPTION WHEN unique_violation THEN
+    RAISE EXCEPTION 'phone_taken';
+  END;
+  RETURN v_uid;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.register_staff_account(UUID, TEXT, TEXT, TEXT) TO authenticated;
+
+-- ---------- رقم ولي الأمر يجب أن يختلف عن رقم الطالب ----------
+-- (يُفحص في دالة التسجيل؛ رسالة عربية في التطبيق: same_guardian_phone)
+
+-- ============================================================================
+-- ٨) صلاحيات الجداول (anon / authenticated)
+--    مشاريع Supabase الجديدة لا تمنح صلاحيات الجداول تلقائياً — وهذه المنح
+--    هي النموذج القياسي في Supabase: الدور قادر على «المحاولة»، وRLS فوقها
+--    يحدد فعلياً ما يمكن قراءته أو كتابته لكل مستخدم.
+-- ============================================================================
+-- service_role لعمليات الخادم الموثوقة فقط (عامل كلاود فلير + سكريبتات الإدارة):
+-- لا يتجاوز RLS لغيره، ولا يظهر في التطبيق إطلاقاً (التطبيق anon فقط).
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+
+-- لتغطية أي جداول تُنشأ مستقبلاً (ترقية الموقع لاحقاً) دون تكرار المشكلة
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon, authenticated, service_role;
 
 COMMIT;
 
 -- ============================================================================
 -- ✅ تم. الخطوات التالية في README.md:
 --   ١) إنشاء حساب المطور (سوبر أدمن) وترقيته بأمر SQL واحد
---   ٢) ضبط المصادقة (تفعيل التسجيل + إيقاف تأكيد البريد)
+--   ٢) ضبط المصادقة (تفعيل التسجيل + تفعيل تأكيد البريد لمنع الوهمي)
 --   ٣) تشغيل التطبيق وربطه
 -- ============================================================================

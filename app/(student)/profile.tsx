@@ -18,6 +18,7 @@ export default function StudentProfileScreen() {
   const { profile, signOut } = useSession();
   const [center, setCenter] = useState<Center | null>(null);
   const [groupName, setGroupName] = useState('—');
+  const [recordName, setRecordName] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!profile?.center_id) return;
@@ -29,6 +30,8 @@ export default function StudentProfileScreen() {
       ]);
       setCenter(c);
       setGroupName(groups.find((g) => g.id === s?.group_id)?.name ?? 'لم تُسند لمجموعة بعد');
+      // اسم سجل الطالب لدى الإدارة أدق من اسم الحساب إن اختلفا
+      setRecordName(s?.name ?? null);
     } catch { /* ignore */ }
   }, [profile?.center_id, profile?.student_id]);
 
@@ -50,7 +53,7 @@ export default function StudentProfileScreen() {
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{(profile?.full_name ?? '؟').trim().charAt(0)}</Text>
           </View>
-          <Text style={styles.name}>{profile?.full_name}</Text>
+          <Text style={styles.name}>{recordName ?? profile?.full_name}</Text>
           <Text style={styles.email}>{profile?.email}</Text>
           {profile?.phone ? <Text style={styles.phone}>{profile.phone}</Text> : null}
         </Card>

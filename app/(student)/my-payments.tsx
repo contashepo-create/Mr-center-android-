@@ -20,7 +20,7 @@ export default function MyPaymentsScreen() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    if (!profile?.student_id) return;
+    if (!profile?.student_id) { setLoading(false); return; }
     try {
       const [d, p] = await Promise.all([
         fetchDuesForStudent(profile.student_id),

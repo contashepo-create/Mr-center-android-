@@ -73,6 +73,26 @@ console.log('\n━━ مسارات العامل ━');
   ok('يسمح بـ GET', (res.headers.get('Access-Control-Allow-Methods') ?? '').includes('GET'));
 }
 
+// /push/notify — الحماية بالسيكرت قبل أي إرسال
+{
+  const noSecret = await worker.fetch(new Request(`${BASE}/push/notify`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tokens: [], title: 'x' }),
+  }), {});
+  ok('الدفع بلا سيكرت مرفوض 403', noSecret.status === 403);
+  const badBody = await worker.fetch(new Request(`${BASE}/push/notify`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-push-secret': 'wrong' },
+    body: 'not-json{{{',
+  }), { PUSH_SECRET: 'right' });
+  const badJson = await badBody.json();
+  ok('سيكرت خاطئ مرفوض', badBody.status === 403 && badJson.ok === false);
+  const emptyTokens = await worker.fetch(new Request(`${BASE}/push/notify`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-push-secret': 'right' },
+    body: JSON.stringify({ tokens: ['junk'], title: '' }),
+  }), { PUSH_SECRET: 'right' });
+  ok('توكنات/عنوان فارغ مرفوض 400', emptyTokens.status === 400);
+}
+
 // اختبار منطقي: انسجام أرقام الإصدار في العامل مع app.json
 {
   const { readFileSync } = await import('node:fs');

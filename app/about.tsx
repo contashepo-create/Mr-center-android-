@@ -12,11 +12,26 @@ import { fetchPublicConfig } from '../src/lib/supabase';
 import type { PublicConfig } from '../src/lib/types';
 import { colors, font, radius, spacing } from '../src/theme';
 
+const APP_FEATURES: { icon: keyof typeof Ionicons.glyphMap; title: string; sub: string }[] = [
+  { icon: 'people', title: 'إدارة الطلاب والمجموعات', sub: 'تسجيل وبحث وفلاتر وحالات وعضويات متعددة' },
+  { icon: 'checkmark-done', title: 'الحضور الذكي', sub: 'تسجيل جماعي + مسح باركود QR يومي آمن' },
+  { icon: 'wallet', title: 'المدفوعات والمستحقات', sub: 'تسعير شهري/أسبوعي/بالحصة + تحصيل وتقارير' },
+  { icon: 'document-text', title: 'اختبارات إلكترونية', sub: 'اختياري وصح/خطأ ومقالي بتصحيح تلقائي ويدوي' },
+  { icon: 'stats-chart', title: 'تقارير شاملة', sub: 'حضور وتحصيل ودرجات + تقرير فردي PDF' },
+  { icon: 'notifications', title: 'إشعارات فورية مجانية', sub: 'بث جماعي + تنبيه قبل الحصة بساعة' },
+  { icon: 'logo-whatsapp', title: 'تكامل واتساب', sub: 'تقارير وتنبيهات ومستحقات مباشرة' },
+  { icon: 'briefcase', title: 'فريق العمل', sub: 'مدرسون ومديرون وسكرتارية بصلاحيات دقيقة' },
+  { icon: 'calendar', title: 'جدول أسبوعي', sub: 'مواعيد كل مجموعة + تنبيه تعارض المواعيد' },
+  { icon: 'library', title: 'مكتبة السنتر', sub: 'لوحة شرف وملفات وروابط واستبيانات' },
+  { icon: 'shield-checkmark', title: 'عزل كامل', sub: 'كل سنتر معزول ببياناته + اشتراكات وباقات' },
+  { icon: 'qr-code', title: 'باركود السنتر', sub: 'للطباعة والمشاركة لتسجيل الطلاب' },
+];
+
 export default function AboutScreen() {
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
 
   useEffect(() => {
-    fetchPublicConfig().then(setCfg);
+    fetchPublicConfig().then(setCfg).catch(() => setCfg({}));
   }, []);
 
   const version = Constants.expoConfig?.version ?? '1.0.0';
@@ -49,6 +64,19 @@ export default function AboutScreen() {
                 <Text style={styles.msgBody}>{cfg.global_message}</Text>
               </Card>
             ) : null}
+
+            <Card style={{ marginTop: spacing.md }}>
+              <Text style={styles.contactTitle}>مميزات التطبيق</Text>
+              {APP_FEATURES.map((f) => (
+                <View key={f.title} style={styles.featRow}>
+                  <Ionicons name={f.icon} size={18} color={colors.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.featTitle}>{f.title}</Text>
+                    <Text style={styles.featSub}>{f.sub}</Text>
+                  </View>
+                </View>
+              ))}
+            </Card>
 
             {(cfg.contact_whatsapp || cfg.contact_email) ? (
               <Card style={{ marginTop: spacing.md }}>
@@ -105,6 +133,9 @@ const styles = StyleSheet.create({
   msgTitle: { color: colors.warning, fontSize: font.md, fontWeight: '800' },
   msgBody: { color: colors.textSecondary, fontSize: font.md, marginTop: spacing.sm, lineHeight: 24, textAlign: 'right' },
   contactTitle: { color: colors.text, fontSize: font.lg, fontWeight: '800', textAlign: 'right' },
+  featRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.md },
+  featTitle: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
+  featSub: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: 2 },
   copyright: {
     color: colors.textMuted, fontSize: font.xs, textAlign: 'center',
     marginTop: spacing.xxl, lineHeight: 18,

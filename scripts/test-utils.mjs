@@ -19,14 +19,15 @@ function ok(name, cond) {
 }
 function eq(name, a, b) { ok(`${name}  [${JSON.stringify(a)} == ${JSON.stringify(b)}]`, a === b); }
 
-// 1) تجميع utils.ts
+// 1) تجميع utils.ts و billing.ts (منطق نقي بلا تبعيات RN)
 const tmp = mkdtempSync(join(tmpdir(), 'utils-test-'));
 try {
   execSync(
-    `npx tsc src/lib/utils.ts --outDir ${tmp} --module esnext --target es2020 --moduleResolution bundler --skipLibCheck`,
+    `npx tsc src/lib/utils.ts src/lib/billing.ts --outDir ${tmp} --module esnext --target es2020 --moduleResolution bundler --skipLibCheck`,
     { cwd: root, stdio: 'pipe' },
   );
   const u = await import(pathToFileURL(join(tmp, 'utils.js')).href);
+  const billing = await import(pathToFileURL(join(tmp, 'billing.js')).href);
 
   console.log('\n━━ uuid ━');
   ok('uuid يطابق صيغة UUID v4', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(u.uuid()));
@@ -89,6 +90,79 @@ try {
   ok('arabicError: كود مكرر', u.arabicError(new Error('center_code_taken')).includes('غير متاح'));
   ok('arabicError: هاتف مكرر', u.arabicError(new Error('phone_taken')).includes('مستخدم'));
   ok('arabicError: انقطاع شبكة', u.arabicError(new Error('Failed to fetch')).includes('الاتصال'));
+  ok('arabicError: مطلوب تأكيد البريد', u.arabicError(new Error('email_confirmation_required')).includes('أكّد بريدك'));
+  ok('arabicError: بريد غير مؤكد', u.arabicError(new Error('Email not confirmed')).includes('رابط التأكيد'));
+
+  console.log('\n━━ الوقت والتاريخ ━');
+  eq('24h إلى دقائق', u.timeToMinutes('16:30'), 990);
+  eq('صيغة عربية م → دقائق', u.timeToMinutes('4:30 م'), 990);
+  eq('صيغة عربية ص → دقائق', u.timeToMinutes('9:05 ص'), 545);
+  eq('12 ص = منتصف الليل', u.timeToMinutes('12:00 ص'), 0);
+  eq('12 م = الظهر', u.timeToMinutes('12:00 م'), 720);
+  eq('وقت فارغ', u.timeToMinutes(''), null);
+  eq('وقت خاطئ', u.timeToMinutes('25:00'), null);
+  eq('دقائق إلى 24h', u.minutesToTime24(990), '16:30');
+  eq('عرض عربي', u.formatTimeAr('16:30'), '4:30 م');
+  eq('عرض صباحي', u.formatTimeAr('09:05'), '9:05 ص');
+  eq('إزاحة تاريخ للأمام', u.shiftDateIso('2026-09-10', 1), '2026-09-11');
+  eq('إزاحة تاريخ للخلف لشهر سابق', u.shiftDateIso('2026-09-01', -1), '2026-08-31');
+  eq('تسعير شهري', u.billingLabel('monthly'), 'شهري');
+  eq('تسعير بالحصة', u.billingLabel('per_session'), 'بالحصة');
+  eq('تسعير افتراضي', u.billingLabel(null), 'شهري');
+
+  console.log('\n━━ تعارض المواعيد ━');
+  const gg = [
+    { id: '1', name: 'أ', days: ['sat', 'mon'], start_time: '16:00', end_time: '18:00' },
+    { id: '2', name: 'ب', days: ['mon'], start_time: '17:00', end_time: '19:00' },
+    { id: '3', name: 'ج', days: ['tue'], start_time: '17:00', end_time: '19:00' },
+    { id: '4', name: 'د', days: ['mon'], start_time: '19:00', end_time: '20:00' },
+  ];
+  const conflicts = u.findGroupConflicts(gg);
+  ok('يكشف تعارضاً واحداً فقط', conflicts.length === 1 && conflicts[0].aName === 'أ' && conflicts[0].bName === 'ب');
+  ok('يتجاهل الأوقات المتجاورة بلا تداخل', u.findGroupConflicts([gg[1], gg[3]]).length === 0);
+  ok('عربي: مغلق التسجيل', u.arabicError(new Error('registration_closed')).includes('مغلق'));
+  ok('عربي: تكرار المحاولة', u.arabicError(new Error('already_attempted')).includes('من قبل'));
+
+  console.log('\n━━ التحقق من الامتحانات ━');
+  ok('يرفض بلا أسئلة', u.validateExamDraft([]) !== null);
+  ok('يرفض سؤالاً بلا نص', u.validateExamDraft([{ q: '', type: 'mcq', choices: ['a', 'b', 'c', 'd'], marks: 1 }]) !== null);
+  ok('يرفض اختيارات ناقصة', u.validateExamDraft([{ q: 'س؟', type: 'mcq', choices: ['a', '', 'c', 'd'], marks: 1 }]) !== null);
+  ok('يقبل مقالياً بلا اختيارات', u.validateExamDraft([{ q: 'علل', type: 'essay', choices: [], marks: 2 }]) === null);
+  ok('يقبل صح/خطأ', u.validateExamDraft([{ q: 'س؟', type: 'tf', choices: ['صح', 'خطأ'], marks: 1 }]) === null);
+  eq('مجموع الدرجات', u.examMarksTotal([{ marks: 2 }, { marks: 3 }]), 5);
+
+  console.log('\n━━ نطاقات البريد والروابط ━');
+  ok('gmail مقبول', u.isValidSignupEmail('user@gmail.com') === true);
+  ok('outlook مقبول', u.isValidSignupEmail('User@Outlook.COM') === true);
+  ok('مؤقت مرفوض', u.isValidSignupEmail('user@mailinator.com') === false);
+  ok('نطاق غريب مرفوض', u.isValidSignupEmail('user@xyz123 temp.org') === false);
+  ok('صيغة خاطئة مرفوضة', u.isValidSignupEmail('not-an-email') === false);
+  ok('رابط https صالح', u.isValidHttpUrl('https://example.com/file.pdf') === true);
+  ok('نص عادي مرفوض كرابط', u.isValidHttpUrl('hello world') === false);
+  ok('كشف تطابق الرقمين بصيغ مختلفة', u.normalizePhone('010 1234-5678') === u.normalizePhone('01012345678'));
+  ok('عربي: تطابق رقم الولي', u.arabicError(new Error('same_guardian_phone')).includes('يختلف'));
+
+  console.log('\n━━ الباقات والحدود (مطابقة المواصفة) ━');
+  eq('تجريبية 7 أيام', billing.TRIAL_DAYS, 7);
+  eq('شامل شهري 600', billing.priceFor('center_full', 1), 600);
+  eq('شامل سنوي 6500', billing.priceFor('center_full', 12), 6500);
+  eq('شامل سنتان 12000', billing.priceFor('center_full', 24), 12000);
+  eq('متوسط شهري 400', billing.priceFor('center_medium', 1), 400);
+  eq('متوسط سنوي 4500', billing.priceFor('center_medium', 12), 4500);
+  eq('متوسط سنتان 8500', billing.priceFor('center_medium', 24), 8500);
+  eq('خصوصي شهري 300', billing.priceFor('solo_teacher', 1), 300);
+  eq('خصوصي سنوي 3000', billing.priceFor('solo_teacher', 12), 3000);
+  eq('خصوصي سنتان 5000', billing.priceFor('solo_teacher', 24), 5000);
+  {
+    const full = billing.limitsFor('center', 'center_full');
+    ok('حدود الشاملة (1/2/4)', full.managers === 1 && full.secretaries === 2 && full.teachers === 4 && full.maxStudents === null);
+    const med = billing.limitsFor('center', 'center_medium');
+    ok('حدود المتوسطة (1/1/2)', med.managers === 1 && med.secretaries === 1 && med.teachers === 2);
+    const solo = billing.limitsFor('solo', 'solo_teacher');
+    ok('حدود المنفرد (0/0/0 + 200 طالب)', solo.managers === 0 && solo.teachers === 0 && solo.maxStudents === 200);
+    const trial = billing.limitsFor('center', 'trial');
+    ok('التجريبية بمزايا كاملة', trial.teachers === 4 && trial.maxStudents === null);
+  }
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }

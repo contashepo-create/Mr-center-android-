@@ -66,7 +66,7 @@ export function UpdateManager() {
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
             style={styles.headerBand}
           >
-            <Ionicons name={forced ? 'alert-circle' : 'rocket'} size={30} color="#fff" />
+            <Ionicons name={forced ? 'alert-circle' : 'rocket'} size={30} color="#052E22" />
             <Text style={styles.headerTitle}>
               {forced ? 'تحديث إجباري مطلوب' : 'يوجد إصدار جديد!'}
             </Text>
@@ -141,8 +141,8 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
   },
   headerBand: { alignItems: 'center', paddingVertical: spacing.xl },
-  headerTitle: { color: '#fff', fontSize: font.xl, fontWeight: '900', marginTop: spacing.sm },
-  headerVersion: { color: 'rgba(255,255,255,0.9)', fontSize: font.md, fontWeight: '700', marginTop: 2 },
+  headerTitle: { color: '#052E22', fontSize: font.xl, fontWeight: '900', marginTop: spacing.sm },
+  headerVersion: { color: 'rgba(4,46,34,0.8)', fontSize: font.md, fontWeight: '700', marginTop: 2 },
   body: { padding: spacing.xl },
   changelogTitle: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
   changelog: {

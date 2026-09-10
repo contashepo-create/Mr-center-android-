@@ -3,13 +3,15 @@
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { AppButton, Card, LoadingView } from '../src/components/controls';
 import { GradientScreen } from '../src/components/layout';
 import { useSession } from '../src/lib/session';
 import { fetchPublicConfig } from '../src/lib/supabase';
 import type { PublicConfig } from '../src/lib/types';
+import { planLabel } from '../src/lib/billing';
+import { formatDate } from '../src/lib/utils';
 import { colors, font, radius, spacing } from '../src/theme';
 
 export default function BlockedScreen() {
@@ -17,9 +19,9 @@ export default function BlockedScreen() {
   const [busy, setBusy] = useState(false);
   const [cfg, setCfg] = useState<PublicConfig>({});
 
-  useState(() => {
-    fetchPublicConfig().then(setCfg);
-  });
+  useEffect(() => {
+    fetchPublicConfig().then(setCfg).catch(() => {});
+  }, []);
 
   const suspended = subscription?.status === 'suspended';
 
@@ -52,14 +54,14 @@ export default function BlockedScreen() {
           {subscription?.ends_on ? (
             <View style={styles.row}>
               <Text style={styles.rowLabel}>تاريخ الانتهاء:</Text>
-              <Text style={styles.rowValue}>{subscription.ends_on}</Text>
+              <Text style={styles.rowValue}>{formatDate(subscription.ends_on)}</Text>
             </View>
           ) : null}
           {subscription?.plan_type ? (
             <View style={styles.row}>
               <Text style={styles.rowLabel}>نوع الباقة:</Text>
               <Text style={styles.rowValue}>
-                {subscription.plan_type === 'monthly' ? 'شهرية' : subscription.plan_type === 'yearly' ? 'سنوية' : 'مخصصة'}
+                {planLabel(subscription.plan_type)}
               </Text>
             </View>
           ) : null}
