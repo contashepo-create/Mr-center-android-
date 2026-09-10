@@ -403,7 +403,7 @@ BEGIN
 
   -- اشتراك تجريبي ٧ أيام بمزايا كاملة — بعده يطلب السنتر الترقية من المطور
   INSERT INTO public.center_subscriptions (center_id, plan_type, starts_on, ends_on, status, notes)
-  VALUES (v_center_id, 'trial', CURRENT_DATE, CURRENT_DATE + 7, 'active', 'اشتراك تجريبي عند التسجيل');
+  VALUES (v_center_id, 'trial', CURRENT_DATE, CURRENT_DATE + 14, 'active', 'اشتراك تجريبي عند التسجيل');
 
   RETURN v_center_id;
 END;

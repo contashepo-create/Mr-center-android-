@@ -76,7 +76,7 @@ console.log('\n━━ الباقات الاحترافية (متطلبات الم
   eq('خصوصي: بلا مدير ولا سكرتير ولا مدرس', [solo.managers, solo.secretaries, solo.teachers], [0, 0, 0]);
   eq('خصوصي: 200 طالب', solo.maxStudents, 200);
 
-  eq('التجريبية 7 أيام', billing.TRIAL_DAYS, 7);
+  eq('التجريبية 14 يوماً', billing.TRIAL_DAYS, 14);
   const trialLimits = billing.limitsFor('center', 'trial');
   eq('التجريبية = مميزات الشامل كاملة (1/2/4 وبلا حد طلاب)',
     [trialLimits.managers, trialLimits.secretaries, trialLimits.teachers, trialLimits.maxStudents], [1, 2, 4, null]);
@@ -306,8 +306,8 @@ console.log('\n━━ ظهور الباقات والاشتراك لأصحابه�
 console.log('\n━━ مخطط قاعدة البيانات (فحص مستقل) ━');
 {
   const sql = readFileSync(join(root, 'supabase/android_multitenant_schema.sql'), 'utf8');
-  ok('التسجيل ينشئ اشتراكاً تجريبياً 7 أيام فعلياً',
-    sql.includes("'trial', CURRENT_DATE, CURRENT_DATE + 7, 'active'"));
+  ok('التسجيل ينشئ اشتراكاً تجريبياً 14 يوماً فعلياً',
+    sql.includes("'trial', CURRENT_DATE, CURRENT_DATE + 14, 'active'"));
   ok('حدود الفريق تُفرض خادمياً (staff_limit_check)', sql.includes('staff_limit_reached'));
   ok('السكرتير: متوسط=1 وإلا 2', sql.includes("v_plan = 'center_medium' THEN v_max := 1") && sql.includes('v_max := 2'));
   ok('المدرسون: متوسط=2 وإلا 4', sql.includes("v_plan = 'center_medium' THEN v_max := 2") && sql.includes('v_max := 4'));

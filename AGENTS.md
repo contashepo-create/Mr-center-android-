@@ -138,7 +138,7 @@
 | `lookup_center_by_code(text)` | anon+auth | `{id,name,owner_name,status}` — يميز الموقوف (DROP قبل تغيير الشكل) |
 | `check_registration_availability(email,phone)` | anon+auth | `{email_taken, phone_taken}` |
 | `get_center_signup_lists(uuid)` | anon+auth | أسماء الصفوف/المجموعات للسنتر الفعّال فقط (للتسجيل) |
-| `complete_center_registration(5 args)` | auth | سنتر+ملف+تجريبي 7 أيام (`trial`) + نوع الحساب |
+| `complete_center_registration(5 args)` | auth | سنتر+ملف+تجريبي 14 يوماً (`trial`) + نوع الحساب |
 | `complete_student_registration(6 args)` | auth | بوابة التسجيل + ربط بسجل موجود + صف/مجموعة + سقف 200 للمنفرد + رقم ولي مختلف |
 | `register_staff_account(center,name,phone,role)` | auth | حساب فريق خامل (يرفض المنفرد `staff_not_allowed`) |
 | `get_my_notifications()` | auth | إشعارات الطالب مفلترة + مقروءية |
@@ -236,7 +236,7 @@ src/
    ├─ types/api/supabase/session/config/pendingRegistration (سنتر/طالب/فريق)
    ├─ rbac.ts             المنطق النقي القابل للاختبار في Node: STAFF_ROLES + isStaff/isOwner + can() + roleLabel + TEACHER_TABS/SCREENS
    ├─ staff.ts            غلاف يعيد تصدير rbac + useTeacherGroupIds (Hook نطاق مجموعات المدرس)
-   ├─ billing.ts          PRODUCTS (الأسعار والحدود) + planLabel + limitsFor + priceFor + TRIAL_DAYS=7
+   ├─ billing.ts          PRODUCTS (الأسعار والحدود) + planLabel + limitsFor + priceFor + TRIAL_DAYS=14
    ├─ qr.ts               يومي MRC1 + ثابت MRC0 (XOR+FNV + UTF-8 عربي + يومية تمنع السكرين)
    ├─ whatsapp.ts         wa.me + تطبيع مصري + قوالب
    ├─ push.ts             رمز الدفع صامتاً (بعد فحص projectId أولاً حتى لا يزعج)
@@ -252,7 +252,7 @@ scripts/  test-fresh (منظومة مستقلة: باقات/مصفوفة صلا�
 
 ## 8) تدفقات الاستخدام الحرجة
 
-- **تسجيل سنتر/منفرد**: نوع الحساب + البيانات + فحص الكود/التوفر + `signUp` ← جلسة؟ فوراً (`complete_center_registration` + تجريبي trial 7 أيام) : معلق + تأكيد + دخول فيُستكمل ← الحارس → `/dashboard`.
+- **تسجيل سنتر/منفرد**: نوع الحساب + البيانات + فحص الكود/التوفر + `signUp` ← جلسة؟ فوراً (`complete_center_registration` + تجريبي trial 14 يوماً) : معلق + تأكيد + دخول فيُستكمل ← الحارس → `/dashboard`.
 - **تسجيل طالب**: كود/باركود (موقوف=مرفوض) ← بطاقة السنتر ← صف/مجموعة (قوائم آمنة) ← توفر ← `signUp` ← فوراً/معلق ← ربط بسجل هاتف موجود إن وُجد ← `/home`. الكود لا يُطلب بعدها أبداً.
 - **تسجيل فريق**: كود + صفة (مدرس/مدير/سكرتير) ← حساب **خامل** ← المالك يفعّل + صلاحيات + مجموعات (بحدود الباقة خادمياً).
 - **الدخول**: بريد+كلمة ← فحص الدور الفعلي + `is_active` + مطابقة النوع مع الشاشة (للمعلق خصوصاً) ← استكمال المعلق (مع الاحتفاظ به عند الفشل) ← الحارس (اشتراك/إيقاف/موقوف) ← التوجيه. الموقوف إدارياً يُطرد فوراً.
@@ -349,7 +349,7 @@ scripts/  test-fresh (منظومة مستقلة: باقات/مصفوفة صلا�
 | «كود السنتر» | `code` 3–8 ثابت وفريد + باركود MRC0 للطباعة |
 | «فريق العمل/المدرس» | `teacher/manager/secretary` — خامل حتى التفعيل + 10 صلاحيات + مجموعات مسندة |
 | «المدير/السكرتير» | أدوار فريق بحدود الباقة (1/1-2/2-4) تُفرض خادمياً |
-| «الباقة/الترقية» | trial(7 أيام) → center_full / center_medium / solo_teacher — طلب بتحويل يعتمده المطور |
+| «الباقة/الترقية» | trial(14 يوماً) → center_full / center_medium / solo_teacher — طلب بتحويل يعتمده المطور |
 | «سجل العمليات/المعاملات» | `activity_log` / `subscription_requests` |
 | «الإشعار/البث» | داخلي مجاني (صف/رسالة + مقروءية) + فوري عبر العامل (push/cron) |
 | «سوبر أدمن / المطور» | `super_admin` — المالك نفسه |

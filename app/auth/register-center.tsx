@@ -237,7 +237,7 @@ export default function RegisterCenterScreen() {
         </Card>
 
         <Text style={styles.footer}>
-          بإنشائك الحساب ستحصل على اشتراك تجريبي 7 أيام بمزايا كاملة، وبعدها تطلب الترقية من المطور.
+          بإنشائك الحساب ستحصل على اشتراك تجريبي 14 يوماً بمزايا كاملة، وبعدها تطلب الترقية من المطور.
         </Text>
       </KeyboardScreen>
     </GradientScreen>

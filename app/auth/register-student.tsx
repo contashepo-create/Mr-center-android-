@@ -54,7 +54,6 @@ export default function RegisterStudentScreen() {
         setError('كود السنتر غير صحيح — تأكد من الكود مع إدارة السنتر');
         return;
       }
-      // ملاحظة: الدالة القديمة على الخادم لا ترجع status — الغياب يُعامل كفعّال
       if (found.status && found.status !== 'active') {
         setError('هذا السنتر موقوف حالياً — تواصل مع إدارته أو إدارة التطبيق');
         return;

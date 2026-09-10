@@ -143,7 +143,7 @@ try {
   ok('عربي: تطابق رقم الولي', u.arabicError(new Error('same_guardian_phone')).includes('يختلف'));
 
   console.log('\n━━ الباقات والحدود (مطابقة المواصفة) ━');
-  eq('تجريبية 7 أيام', billing.TRIAL_DAYS, 7);
+  eq('تجريبية 14 يوماً', billing.TRIAL_DAYS, 14);
   eq('شامل شهري 600', billing.priceFor('center_full', 1), 600);
   eq('شامل سنوي 6500', billing.priceFor('center_full', 12), 6500);
   eq('شامل سنتان 12000', billing.priceFor('center_full', 24), 12000);

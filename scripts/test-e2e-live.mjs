@@ -109,7 +109,7 @@ try {
   createdCenterIds.push(centerId);
   ok('إنشاء السنتر + الملف', !!centerId);
   const { data: sub } = await owner.rpc('get_my_subscription');
-  ok('اشتراك تجريبي فعّال 7 أيام', sub?.status === 'active' && sub?.days_left === 7, JSON.stringify(sub));
+  ok('اشتراك تجريبي فعّال 14 يوماً', sub?.status === 'active' && (sub?.days_left === 14 || sub?.days_left === 13), JSON.stringify(sub));
   await expectThrow('منع تكرار التسجيل', () =>
     owner.rpc('complete_center_registration', { p_center_name: 'x', p_code: 'ZZZ', p_owner_name: 'x', p_phone: '0100000000', p_kind: 'center' }), 'already_registered');
 

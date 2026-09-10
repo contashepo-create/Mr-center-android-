@@ -112,7 +112,7 @@ check('رسالة الكود المكرر (center_code_taken)', has('EXCEPTION \
 check('رسالة الهاتف المكرر (phone_taken)', has('EXCEPTION \'phone_taken\''));
 check('رفض السنتر الموقوف عند تسجيل الطالب', has('EXCEPTION \'center_suspended\''));
 check('إنشاء اشتراك تجريبي تلقائي للسنتر الجديد', has('اشتراك تجريبي'));
-check('الاشتراك التجريبي 7 أيام بخطة trial', has('CURRENT_DATE + 7') && has("'trial'"));
+check('الاشتراك التجريبي 14 يوماً بخطة trial', has('CURRENT_DATE + 14') && has("'trial'"));
 check('منتجات الباقات في القيد', has("'center_full','center_medium','solo_teacher'")); 
 check('حظر تكرار التسجيل لنفس الحساب (already_registered)', has('EXCEPTION \'already_registered\''));
 check('الطوابع الزمنية TIMESTAMPTZ لا TEXT (منع خطأ created_at)', !/v_now TEXT/.test(sql));
