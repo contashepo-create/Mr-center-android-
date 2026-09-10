@@ -223,7 +223,7 @@ try {
   }).select().single();
   const { data: res8 } = await stu.rpc('submit_exam_attempt', {
     p_exam_id: exam8.id,
-    p_answers: [[1, 0], norm('عاصمه'), [0, 1], 'ذهب أحمد إلى المدرسة'],
+    p_answers: [[0, 1], norm('عاصمه'), [0, 1], 'ذهب أحمد إلى المدرسة'], // multi مرتبة كما يرسلها التطبيق
   });
   ok('متعدد/أكمل/وصل تلقائي + صحّح بالمطابقة التامة = 7/7',
     res8?.score === 7 && res8?.status === 'pending_review' && res8?.correct === 4, JSON.stringify(res8));
