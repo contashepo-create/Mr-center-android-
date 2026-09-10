@@ -14,7 +14,7 @@ import { useSession } from '../../src/lib/session';
 import { arabicError, formatDate } from '../../src/lib/utils';
 import { planLabel } from '../../src/lib/billing';
 import { openWhatsApp } from '../../src/lib/whatsapp';
-import { colors, spacing } from '../../src/theme';
+import { colors, spacing, themedStyles } from '../../src/theme';
 
 export default function DevCentersScreen() {
   const { profile, ready } = useSession();
@@ -138,10 +138,10 @@ export default function DevCentersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   waBtn: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: '#25D36622', borderWidth: 1, borderColor: '#25D36655',
     alignItems: 'center', justifyContent: 'center',
   },
-});
+}));

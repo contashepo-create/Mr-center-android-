@@ -12,21 +12,23 @@ import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { FormMessage, OptionPicker } from '../../src/components/pickers';
 import {
   createSubscriptionRequest, fetchMyCenter, fetchSubscriptionRequests,
-  logActivity,
+  fetchSubscriptionsHistory, logActivity,
 } from '../../src/lib/api';
+import type { Subscription } from '../../src/lib/types';
 import { useSession } from '../../src/lib/session';
 import { getSupabase } from '../../src/lib/supabase';
 import { isOwner } from '../../src/lib/staff';
 import { planLabel, priceFor, PRODUCTS, TRIAL_DAYS, type PlanDuration } from '../../src/lib/billing';
 import type { Center, SubscriptionRequest } from '../../src/lib/types';
 import { arabicError, formatDate, formatMoney } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function SubscriptionScreen() {
   const { profile, subscription } = useSession();
   const centerId = profile?.center_id ?? '';
   const [center, setCenter] = useState<Center | null>(null);
   const [requests, setRequests] = useState<SubscriptionRequest[]>([]);
+  const [history, setHistory] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -41,10 +43,11 @@ export default function SubscriptionScreen() {
   const load = useCallback(async () => {
     if (!centerId) return;
     try {
-      const [c, r] = await Promise.all([
+      const [c, r, h] = await Promise.all([
         fetchMyCenter(centerId), fetchSubscriptionRequests(centerId),
+        fetchSubscriptionsHistory(centerId),
       ]);
-      setCenter(c); setRequests(r);
+      setCenter(c); setRequests(r); setHistory(h);
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
@@ -200,6 +203,29 @@ export default function SubscriptionScreen() {
               {pending.length > 0 ? (
                 <FormMessage type="info" text={`لديك ${pending.length} طلب قيد مراجعة المطور`} />
               ) : null}
+
+              {/* سجل المعاملات مع المطور: كل اشتراك فُعّل لسنترك */}
+              <SectionTitle title={`سجل المعاملات مع المطور (${history.length})`} />
+              {history.length === 0 ? (
+                <Card><Text style={styles.dimText}>لا معاملات بعد — تجربتك المجانية أول سجل</Text></Card>
+              ) : history.map((h) => (
+                <Card key={h.id} style={styles.reqCard}>
+                  <View style={styles.reqHead}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.reqTitle}>{planLabel(h.plan_type)} · {h.status === 'active' ? 'ساري' : h.status === 'suspended' ? 'موقوف' : 'منتهي'}</Text>
+                      <Text style={styles.reqMeta}>
+                        {h.starts_on} ← {h.ends_on}
+                        {h.notes ? `\n${h.notes}` : ''}
+                      </Text>
+                    </View>
+                    <View style={[styles.statusPill, { backgroundColor: (h.status === 'active' ? colors.success : h.status === 'suspended' ? colors.danger : colors.warning) + '22' }]}>
+                      <Text style={[styles.statusText, { color: h.status === 'active' ? colors.success : h.status === 'suspended' ? colors.danger : colors.warning }]}>
+                        {h.status === 'active' ? 'ساري' : h.status === 'suspended' ? 'موقوف' : 'منتهي'}
+                      </Text>
+                    </View>
+                  </View>
+                </Card>
+              ))}
             </>
           }
           renderItem={() => null}
@@ -257,7 +283,7 @@ export default function SubscriptionScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   currentCard: { borderColor: colors.primary + '66' },
   currentHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   currentLabel: { color: colors.textMuted, fontSize: font.xs, fontWeight: '700', textAlign: 'right' },
@@ -290,4 +316,4 @@ const styles = StyleSheet.create({
     color: colors.text, fontSize: font.lg, fontWeight: '900',
     textAlign: 'center', marginBottom: spacing.lg,
   },
-});
+}));

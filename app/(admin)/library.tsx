@@ -20,7 +20,7 @@ import {
 import { useSession } from '../../src/lib/session';
 import type { Grade, Group, Student } from '../../src/lib/types';
 import { arabicError, isValidHttpUrl } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 type Tab = 'honorees' | 'files' | 'links';
 
@@ -374,7 +374,7 @@ function MiniBtn({ icon, label, color, onPress }: {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   addBtn: {
     width: 40, height: 40, borderRadius: radius.full,
     backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
@@ -440,4 +440,4 @@ const styles = StyleSheet.create({
   candidateName: { color: colors.text, fontSize: font.md, fontWeight: '700', textAlign: 'right' },
   candidateMeta: { color: colors.textSecondary, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
   dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center', paddingVertical: spacing.md },
-});
+}));

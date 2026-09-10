@@ -113,7 +113,8 @@
 | `center_subscriptions` | الاشتراكات | `plan_type` (trial/monthly/yearly/custom/center_full/center_medium/solo_teacher) · `starts_on/ends_on` · `status` |
 | `subscription_requests` | طلبات الترقية | `plan/months/amount/transfer_at` · `status` (pending/approved/rejected) — كتابة المالك pending فقط |
 | `activity_log` | سجل عمليات لا يُحذف | كتابة الفريق المفعّل، قراءة المالك والمطور |
-| `app_exams`/`app_exam_attempts` | اختبارات (mcq/tf/essay بدرجات) + محاولة واحدة (التصحيح عبر RPC) | `questions/answers` jsonb · `status` (graded/pending_review) · `UNIQUE(exam,student)` — **بلا إدخال مباشر للطالب عمداً** |
+| `app_exams`/`app_exam_attempts` | اختبارات (8 أنواع بدرجات) + محاولة واحدة (التصحيح عبر RPC) | `questions/answers` jsonb · الأنواع: mcq/multi/tf/complete/match تلقائي + correct/essay/short يدوي · `status` (graded/pending_review) · `UNIQUE(exam,student)` — **بلا إدخال مباشر للطالب عمداً** |
+| `support_messages` | قناة الدعم (مالك ↔ مطور) | `sender_role` (owner/developer) · سياسات: owner يقرأ ويرسل لسنتره والمطور الكل (`support_owner_read/insert` + `support_super_admin`) |
 | `app_inquiries` | طلبات (سؤال/نقل/تسجيل) + رد وحالة | `kind` · `status` · `reply` |
 | `app_surveys`/`app_survey_responses` | استبيانات + رد واحد | `is_active` · `UNIQUE(survey,student)` |
 | `center_settings` | إعدادات تشغيلية | `settings` jsonb (واتساب/فتح التسجيل/سنة الأرشيف) |
@@ -138,7 +139,7 @@
 | `lookup_center_by_code(text)` | anon+auth | `{id,name,owner_name,status}` — يميز الموقوف (DROP قبل تغيير الشكل) |
 | `check_registration_availability(email,phone)` | anon+auth | `{email_taken, phone_taken}` |
 | `get_center_signup_lists(uuid)` | anon+auth | أسماء الصفوف/المجموعات للسنتر الفعّال فقط (للتسجيل) |
-| `complete_center_registration(5 args)` | auth | سنتر+ملف+تجريبي 7 أيام (`trial`) + نوع الحساب |
+| `complete_center_registration(5 args)` | auth | سنتر+ملف+تجريبي 14 يوماً (`trial`) + نوع الحساب |
 | `complete_student_registration(6 args)` | auth | بوابة التسجيل + ربط بسجل موجود + صف/مجموعة + سقف 200 للمنفرد + رقم ولي مختلف |
 | `register_staff_account(center,name,phone,role)` | auth | حساب فريق خامل (يرفض المنفرد `staff_not_allowed`) |
 | `get_my_notifications()` | auth | إشعارات الطالب مفلترة + مقروءية |
@@ -199,7 +200,7 @@ app/  (مجلدات (x) بلا مسار)
 ├─ developer/             بوابة لكل صفحة (DeveloperGate) + index (إحصائيات تشمل الفريق) + connection (خروج إجباري عند تبديل القاعدة) + broadcast (تجميع البثوث + معاينة + تتبع) + centers (واتساب المالك + تفاصيل) + center-detail (ملف السنتر الكامل) + subscriptions (منتجات + اعتماد طلبات) + app-info
 ├─ (admin)/               تبويبات (إخفاء حسب صلاحيات الفريق + شارة اشتراك للمالك فقط)
 │  ├─ dashboard.tsx       ترحيب + (اشتراك للمالك فقط) + إحصائيات + إجراءات مفلترة بالصلاحية
-│  ├─ students.tsx        بحث معقم + فلتر حالة (نشط/موقوف/مؤرشف) ومجموعات + بطاقات منفصلة + (إدارة للمالك فقط)
+│  ├─ students.tsx        بحث معقم + فلاتر حالة/مجموعة بعدادات + ترتيب أبجدي دائم + عداد «عرض X من Y» + بطاقة بحرف الاسم + (إدارة للمالك فقط)
 │  ├─ groups.tsx          CRUD (للمالك) + TimePicker + تسعير (شهري/أسبوعي/بالحصة) + مدرس + بطاقات غنية + تحقق أيام/زمن + تنبيه تعارض
 │  ├─ attendance.tsx      تنقل تاريخ بسقف اليوم + كشف بلا حصص وهمية (تُنشأ عند الحفظ) + حاضر/متأخر/غائب + كل حاضر/غائب + ماسح
 │  ├─ scan.tsx            كاميرا بلا أطفال (طبقة عائمة) + إذن تلقائي + إعدادات عند الرفض + بحث يدوي + رفض غير النشط + تحصيل بالأقدم
@@ -207,12 +208,13 @@ app/  (مجلدات (x) بلا مسار)
 │  ├─ subscription.tsx    الباقات (للمالك فقط): خطته + المنتجات + طلب ترقية (خطة/مدة/تاريخ وقيمة التحويل) + سحب الطلب
 │  ├─ activity.tsx        سجل العمليات (للمالك فقط)
 │  ├─ payments.tsx        توليد حسب التسعير (طالب+مجموعة) + معلق/جزئي(Dفع ناقص)/مسدد + سجلات الأيتام بلا تنقل
-│  ├─ exams.tsx           (اختياري/صح-خطأ/مقالي بدرجات): قوالب + معاينة + منع نشر ناقص + تحذير تعديل المنشور + نتائج + تصحيح يدوي + PDF
+│  ├─ exams.tsx           8 أنواع (اختياري/متعدد/صح-خطأ/أكمل/وصل/صحّح/مقالي/قصير): 5 قوالب + معاينة + منع نشر ناقص + تحذير تعديل المنشور + نتائج + تصحيح يدوي + PDF
 │  ├─ inquiries.tsx       فلتر + رد (رد/قبول/رفض) + إغلاق + فتح ملف الطالب للنقل
 │  ├─ surveys.tsx         إنشاء + تفعيل + نتائج + قفل الأسئلة المُجابة (فحص لحظي)
 │  ├─ library.tsx         شرف (اختيار طالب مفلتر + اسم يدوي للأرشيف) + ملفات + روابط (تحقق URL)
 │  ├─ schedule.tsx        أسبوعي + تعارض + مجموعات بلا أيام + أسعار حسب التسعير + PDF
-│  ├─ reports.tsx         شهر: حضور/تحصيل/متوسطات (طالب محذوف موسوم) + PDF
+│  ├─ reports.tsx         4 تبويبات: نظرة عامة (حضور/تحصيل/متوسطات) + تقرير طالب (شامل/شهري/مالي/أكاديمي بفلتر صف+مجموعة) + الدرجات اليدوية + الحضور والاختبارات — كلها PDF
+│  ├─ support.tsx          قناة الدعم: محادثة مباشرة مالك↔مطور (isOwner فقط)
 │  ├─ whatsapp.tsx        نطاق (كل/صف/مجموعة/طالب) + هدف (طالب/ولي) + قوالب + إرسال منفصل (فشل رقم لا يعطل) + نطاق المدرس لمجموعاته
 │  ├─ notifications.tsx   بث (عدّ دقيق بعضويات إضافية) + مقروءية باستعلام واحد + حذف
 │  ├─ dev-notices.tsx     صندوق المطور (للمالك فقط)
@@ -224,7 +226,7 @@ app/  (مجلدات (x) بلا مسار)
 │  └─ student/[id].tsx    ملف شامل: مجموعات (أساسية+إضافية للمالك فقط) + مستحقات/دفعات (تحصيل collect) + درجات (grades) + محاولات بعناوين + سجل نشاط + تقرير PDF شامل + واتساب (notify)
 └─ (student)/             تبويبات + شاشات مخفية (my-exams/my-inquiries/my-surveys/my-library/my-schedule/my-notifications)
    ├─ home.tsx            ترحيب + مجموعتي + باركود يومي + أوائل + شارة غير المقروء + روابط + إعلانات (20)
-   ├─ my-exams.tsx        منشورة + تأدية كل الأنواع بمؤقت + خروج مؤكد + أسئلة معطوبة موسومة + نتائج (مراجعة)
+   ├─ my-exams.tsx        منشورة + تأدية الأنواع الثمانية بمؤقت (متعدد/وصل بخلط ثابت/أكمل بتطبيع قبل التسليم) + خروج مؤكد + نتائج (مراجعة)
    ├─ my-notifications.tsx غير مقروء/الأحدث + تعليم عند الفتح (UNIQUE يمنع التكرار)
    ├─ my-schedule.tsx     كل مجموعاته (أساسية+إضافية)
    ├─ my-library/surveys/inquiries/attendance/grades/payments/profile (اسم السجل أدق + تحميل آمن)
@@ -234,15 +236,16 @@ src/
 ├─ components/            layout (BackHeader برجوع آمن canGoBack) · controls (AppButton/Content بأنيميشن spring + تباين أحبار + NoAccess + SheetHandle) · pickers (OptionPicker + DaysPicker + TimePicker + FormMessage بزر نسخ) · LoginForm (أدوار ثلاث + معلق + إعادة تأكيد + نسيت محمي) · DeveloperGate (صفحة لا Layout) · ConnectionSetup · UpdateManager (تباين داكن)
 └─ lib/
    ├─ types/api/supabase/session/config/pendingRegistration (سنتر/طالب/فريق)
-   ├─ staff.ts            STAFF_ROLES + isStaff/isOwner + can() + roleLabel + useTeacherGroupIds + TEACHER_TABS/SCREENS
-   ├─ billing.ts          PRODUCTS (الأسعار والحدود) + planLabel + limitsFor + priceFor + TRIAL_DAYS=7
+   ├─ rbac.ts             المنطق النقي القابل للاختبار في Node: STAFF_ROLES + isStaff/isOwner + can() + roleLabel + TEACHER_TABS/SCREENS
+   ├─ staff.ts            غلاف يعيد تصدير rbac + useTeacherGroupIds (Hook نطاق مجموعات المدرس)
+   ├─ billing.ts          PRODUCTS (الأسعار والحدود) + planLabel + limitsFor + priceFor + TRIAL_DAYS=14
    ├─ qr.ts               يومي MRC1 + ثابت MRC0 (XOR+FNV + UTF-8 عربي + يومية تمنع السكرين)
    ├─ whatsapp.ts         wa.me + تطبيع مصري + قوالب
    ├─ push.ts             رمز الدفع صامتاً (بعد فحص projectId أولاً حتى لا يزعج)
    ├─ backup.ts           نسخة JSON كاملة (23 جدولاً) بالتوازي + مشاركة
    └─ report.ts           HTML عربي → PDF ومشاركة
 
-scripts/  test-utils (utils+billing) · test-qr · test-worker (يشمل /push/notify 403/400) · audit-sql · audit-rpc (تطابق وسائط التطبيق↔القاعدة) · audit-app · test-e2e-live (حي: E2E_* keys + تنظيف + تدوير service_role بعده)
+scripts/  test-fresh (منظومة مستقلة: باقات/مصفوفة صلاحيات/بوابات شاشات/ثيم حي/بث مجمّع/rate limit/تنقل/عزل api/مخطط) · test-utils (utils+billing) · test-qr · test-worker (يشمل /push/notify 403/400) · audit-sql · audit-rpc (تطابق وسائط التطبيق↔القاعدة) · audit-app · test-e2e-live (حي: E2E_* keys + تنظيف + تدوير service_role بعده)
 ```
 
 **اصطلاحات**: `getSupabase()` فقط · لا حالة خارج SessionProvider · الأدوار من `profiles` · أخطاء معربة · RLS أولاً والواجهة تجميل · أي شاشة جديدة تُسجل في (الحارس + التبويبات + audit-app) معاً.
@@ -251,7 +254,7 @@ scripts/  test-utils (utils+billing) · test-qr · test-worker (يشمل /push/n
 
 ## 8) تدفقات الاستخدام الحرجة
 
-- **تسجيل سنتر/منفرد**: نوع الحساب + البيانات + فحص الكود/التوفر + `signUp` ← جلسة؟ فوراً (`complete_center_registration` + تجريبي trial 7 أيام) : معلق + تأكيد + دخول فيُستكمل ← الحارس → `/dashboard`.
+- **تسجيل سنتر/منفرد**: نوع الحساب + البيانات + فحص الكود/التوفر + `signUp` ← جلسة؟ فوراً (`complete_center_registration` + تجريبي trial 14 يوماً) : معلق + تأكيد + دخول فيُستكمل ← الحارس → `/dashboard`.
 - **تسجيل طالب**: كود/باركود (موقوف=مرفوض) ← بطاقة السنتر ← صف/مجموعة (قوائم آمنة) ← توفر ← `signUp` ← فوراً/معلق ← ربط بسجل هاتف موجود إن وُجد ← `/home`. الكود لا يُطلب بعدها أبداً.
 - **تسجيل فريق**: كود + صفة (مدرس/مدير/سكرتير) ← حساب **خامل** ← المالك يفعّل + صلاحيات + مجموعات (بحدود الباقة خادمياً).
 - **الدخول**: بريد+كلمة ← فحص الدور الفعلي + `is_active` + مطابقة النوع مع الشاشة (للمعلق خصوصاً) ← استكمال المعلق (مع الاحتفاظ به عند الفشل) ← الحارس (اشتراك/إيقاف/موقوف) ← التوجيه. الموقوف إدارياً يُطرد فوراً.
@@ -278,6 +281,8 @@ scripts/  test-utils (utils+billing) · test-qr · test-worker (يشمل /push/n
 13. أي RPC تُغيَّر وسائطه/إرجاعه: `DROP FUNCTION` أولاً + تعريف الدوال قبل سياساتها + فحص `audit-rpc` أخضر.
 14. المنع الافتراضي للفريق: أي شاشة/زر جديد يُفحص بـ `can()` أو `isOwner` + يُسجل في `TEACHER_SCREENS`/التبويبات + فحص `audit-app`.
 15. أرقام الباقات والحدود في `billing.ts` فقط — يغطيها `test-utils` (أي تغيير سعر يكسر الفحص عمداً للمراجعة).
+16. أنواع أسئلة الامتحان ثمانية في `types.ts`/`EXAM_TYPE_LABEL` — التصحيح التلقائي خادمي بمساواة JSON عامة (multi=مصفوفة مرتبة · complete=نص عبر `normalizeAnswerText` · match=مصفوفة هوية)، واليدوي (correct/essay/short) يذهب لـ`pending_review` عبر `v_type IN ('essay','correct','short')` في الـRPC. «صحّح» بنموذج يُحسب آلياً عند المطابقة التامة.
+17. نطاق المدرس: students/groups/schedule (وكل شاشة بيانات) تقصر قوائمها على `useTeacherGroupIds` — المدرس لا يرى إلا مجموعاته المسندة وطلابها. ملف الطالب: المستحقات والدفعات بصلاحية collect/reports فقط. guide/schedule عرضيتان (قراءة فقط) بلا بوابة صلاحية.
 16. لا أسرار في الكود/الشات (`service_role` للعامل Secrets والسكريبتات فقط، ويُبدَّل بعد المشاركة).
 
 ---
@@ -286,7 +291,8 @@ scripts/  test-utils (utils+billing) · test-qr · test-worker (يشمل /push/n
 
 | الجناح | الفحوص | الوصف |
 |---|---|---|
-| `test-utils.mjs` | 95 | منطق نقي (utils+billing بتجميع tsc): تطبيع/صيغ/وقت/تعارض/بريد/روابط/امتحانات/باقات وأسعار |
+| `test-fresh.mjs` | 186 | منظومة مستقلة كلياً: باقات حرفية · مصفوفة صلاحيات كل دور · بوابات كل شاشة · نطاق المدرس · ثيم حي بتباين WCAG · تجميع بث المطور · rate limit بكل الصيغ · بنية تنقل · عزل api · مخطط القاعدة |
+| `test-utils.mjs` | 119 | منطق نقي (utils+billing بتجميع tsc): تطبيع/صيغ/وقت/تعارض/بريد/روابط/امتحانات (8 أنواع + normalizeAnswerText + seededShuffle)/باقات وأسعار |
 | `test-qr.mjs` | 15 | ترميز/فك الطالب والسنتر (يشمل عربياً) + رفض الدخيل/المعبث + اليومية |
 | `test-worker.mjs` | 22 | مسارات العامل + CORS + توافق الإصدار + `/push/notify` (403/400) |
 | `audit-sql.mjs` | 117 | بنية/RLS/عزل/قائمة بيضاء/مشغلات/فرادة/RPC/جداول جديدة/ترتيب التعريف/DROPs |
@@ -346,7 +352,7 @@ scripts/  test-utils (utils+billing) · test-qr · test-worker (يشمل /push/n
 | «كود السنتر» | `code` 3–8 ثابت وفريد + باركود MRC0 للطباعة |
 | «فريق العمل/المدرس» | `teacher/manager/secretary` — خامل حتى التفعيل + 10 صلاحيات + مجموعات مسندة |
 | «المدير/السكرتير» | أدوار فريق بحدود الباقة (1/1-2/2-4) تُفرض خادمياً |
-| «الباقة/الترقية» | trial(7 أيام) → center_full / center_medium / solo_teacher — طلب بتحويل يعتمده المطور |
+| «الباقة/الترقية» | trial(14 يوماً) → center_full / center_medium / solo_teacher — طلب بتحويل يعتمده المطور |
 | «سجل العمليات/المعاملات» | `activity_log` / `subscription_requests` |
 | «الإشعار/البث» | داخلي مجاني (صف/رسالة + مقروءية) + فوري عبر العامل (push/cron) |
 | «سوبر أدمن / المطور» | `super_admin` — المالك نفسه |
@@ -358,7 +364,7 @@ scripts/  test-utils (utils+billing) · test-qr · test-worker (يشمل /push/n
 
 ## 16) قائمة فحص قبل التسليم
 
-- [ ] `npm test` — الأجنحة الستة خضراء (وأضِف فحوصاً لما أضفته).
+- [ ] `npm test` — الأجنحة السبعة خضراء (وأضِف فحوصاً لما أضفته).
 - [ ] `npm run typecheck` — صفر أخطاء.
 - [ ] `CI=1 npx expo export --platform android` — الحزمة تُبنى.
 - [ ] القسم 9 بنداً بنداً + العربية RTL + رسائل معربة بزر نسخ.

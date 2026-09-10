@@ -17,7 +17,7 @@ import { useSession } from '../../src/lib/session';
 import { planLabel, PRODUCTS } from '../../src/lib/billing';
 import type { PlanType, SubscriptionRequest } from '../../src/lib/types';
 import { arabicError, formatDate, formatMoney } from '../../src/lib/utils';
-import { colors, font, spacing } from '../../src/theme';
+import { colors, font, spacing, themedStyles } from '../../src/theme';
 
 type ReqRow = SubscriptionRequest & { center_name?: string; center_code?: string };
 
@@ -107,7 +107,7 @@ export default function DevSubscriptionsScreen() {
               await devSetCenterStatus(r.center_id, 'active');
               await logActivity(r.center_id, 'subscription_upgraded', `${planLabel(r.plan)} — اعتماد طلب بتحويل ${formatMoney(r.amount)}`);
             }
-            await devResolveRequest(r.id, r.center_id, approve);
+            await devResolveRequest(r.id, approve);
             await logActivity(r.center_id, approve ? 'request_approved' : 'request_rejected', `طلب ${planLabel(r.plan)} — ${formatMoney(r.amount)}`);
             await load();
           } catch (e) {
@@ -239,7 +239,7 @@ export default function DevSubscriptionsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   dim: { color: colors.textSecondary, fontSize: font.md },
   dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
   value: { color: colors.text, fontSize: font.md, fontWeight: '800' },
@@ -248,4 +248,4 @@ const styles = StyleSheet.create({
   reqCard: { marginBottom: spacing.sm },
   reqTitle: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
   reqMeta: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: 4, lineHeight: 20 },
-});
+}));

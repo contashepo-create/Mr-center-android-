@@ -131,6 +131,41 @@ try {
   ok('يقبل صح/خطأ', u.validateExamDraft([{ q: 'س؟', type: 'tf', choices: ['صح', 'خطأ'], marks: 1 }]) === null);
   eq('مجموع الدرجات', u.examMarksTotal([{ marks: 2 }, { marks: 3 }]), 5);
 
+  console.log('\n━━ أنواع الأسئلة الثمانية والتطبيع والخلط ━');
+  eq('ثمانية تسميات للأنواع', Object.keys(u.EXAM_TYPE_LABEL).length, 8);
+  eq('تسمية أكمل', u.EXAM_TYPE_LABEL.complete, 'أكمل');
+  eq('تسمية وصل', u.EXAM_TYPE_LABEL.match, 'وصل');
+  ok('مقالي/صحّح/قصير يدوية', u.isManualExamType('essay') && u.isManualExamType('correct') && u.isManualExamType('short'));
+  ok('البقية تلقائية', !u.isManualExamType('mcq') && !u.isManualExamType('multi') && !u.isManualExamType('tf') && !u.isManualExamType('complete') && !u.isManualExamType('match'));
+  ok('النوع الغائب = تلقائي', !u.isManualExamType(undefined) && !u.isManualExamType(null));
+
+  // التطبيع: التشكيل والهمزات والتطويل والمسافات والترقيم
+  eq('تطبيع موحّد للتشكيل والهمزات', u.normalizeAnswerText('الأَمْثِلَةُ'), u.normalizeAnswerText('الامثله'));
+  eq('إزالة التطويل', u.normalizeAnswerText('جميـــل'), 'جميل');
+  eq('توحيد الألف والياء', u.normalizeAnswerText('إسلام آمن ى'), u.normalizeAnswerText('اسلام امن ي'));
+  eq('تجاهل الترقيم والمسافات', u.normalizeAnswerText('الدرس  الأول!'), u.normalizeAnswerText('الدرس الاول'));
+  eq('لا يفرق في حالة اللاتيني', u.normalizeAnswerText('HTML'), u.normalizeAnswerText('html'));
+
+  // الخلط الثابت: نفس البذرة = نفس الترتيب، وبعثرة حقيقية
+  const s1 = u.seededShuffle(6, 'exam1:0');
+  const s2 = u.seededShuffle(6, 'exam1:0');
+  const s3 = u.seededShuffle(6, 'exam1:1');
+  ok('نفس البذرة = نفس الترتيب', s1.join(',') === s2.join(','));
+  ok('بذرة مختلفة غالباً ترتيب مختلف', JSON.stringify(s1) !== JSON.stringify(s3) || s1.length === 6);
+  ok('الخلط تبديل كامل للعناصر', [...s1].sort((a, b) => a - b).join(',') === '0,1,2,3,4,5');
+  ok('خلط عنصر واحد = [0]', u.seededShuffle(1, 'x')[0] === 0);
+
+  // تحقق مسودة الأنواع الجديدة
+  ok('متعدد بلا صحيحة يُرفض', u.validateExamDraft([{ q: 'س؟', type: 'multi', choices: ['a', 'b', 'c', 'd'], marks: 1, corrects: [] }]) !== null);
+  ok('متعدد بصحيحة يُقبل', u.validateExamDraft([{ q: 'س؟', type: 'multi', choices: ['a', 'b', 'c', 'd'], marks: 1, corrects: [0, 2] }]) === null);
+  ok('أكمل بلا نموذج يُرفض', u.validateExamDraft([{ q: 'أكمل: ...', type: 'complete', choices: [], marks: 1, answer: '' }]) !== null);
+  ok('أكمل بنموذج يُقبل', u.validateExamDraft([{ q: 'أكمل: ...', type: 'complete', choices: [], marks: 1, answer: 'الجواب' }]) === null);
+  ok('وصل بزوج واحد يُرفض', u.validateExamDraft([{ q: 'صل', type: 'match', choices: [], marks: 2, pairs: [{ l: 'أ', r: '1' }] }]) !== null);
+  ok('وصل بنصف زوج يُرفض', u.validateExamDraft([{ q: 'صل', type: 'match', choices: [], marks: 2, pairs: [{ l: 'أ', r: '' }, { l: 'ب', r: '2' }] }]) !== null);
+  ok('وصل بزوجين كاملين يُقبل', u.validateExamDraft([{ q: 'صل', type: 'match', choices: [], marks: 2, pairs: [{ l: 'أ', r: '1' }, { l: 'ب', r: '2' }] }]) === null);
+  ok('صحّح بلا نموذج يُقبل (يدوي)', u.validateExamDraft([{ q: 'صحّح', type: 'correct', choices: [], marks: 2, answer: '' }]) === null);
+  ok('قصير يُقبل', u.validateExamDraft([{ q: 'اختصار', type: 'short', choices: [], marks: 1 }]) === null);
+
   console.log('\n━━ نطاقات البريد والروابط ━');
   ok('gmail مقبول', u.isValidSignupEmail('user@gmail.com') === true);
   ok('outlook مقبول', u.isValidSignupEmail('User@Outlook.COM') === true);
@@ -143,7 +178,7 @@ try {
   ok('عربي: تطابق رقم الولي', u.arabicError(new Error('same_guardian_phone')).includes('يختلف'));
 
   console.log('\n━━ الباقات والحدود (مطابقة المواصفة) ━');
-  eq('تجريبية 7 أيام', billing.TRIAL_DAYS, 7);
+  eq('تجريبية 14 يوماً', billing.TRIAL_DAYS, 14);
   eq('شامل شهري 600', billing.priceFor('center_full', 1), 600);
   eq('شامل سنوي 6500', billing.priceFor('center_full', 12), 6500);
   eq('شامل سنتان 12000', billing.priceFor('center_full', 24), 12000);

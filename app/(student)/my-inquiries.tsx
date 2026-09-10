@@ -13,7 +13,7 @@ import { addInquiry, fetchMyInquiries } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import type { AppInquiry, InquiryKind } from '../../src/lib/types';
 import { arabicError, formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 const KIND_OPTIONS = [
   { value: 'question', label: 'سؤال عن الدروس' },
@@ -143,7 +143,7 @@ export default function MyInquiriesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   title: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
   meta: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
@@ -167,4 +167,4 @@ const styles = StyleSheet.create({
     color: colors.text, fontSize: font.lg, fontWeight: '900',
     textAlign: 'center', marginBottom: spacing.lg,
   },
-});
+}));

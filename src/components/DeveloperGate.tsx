@@ -10,7 +10,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { loginWithEmail } from '../lib/api';
 import { useSession } from '../lib/session';
 import { arabicError, isValidEmail } from '../lib/utils';
-import { colors, font, radius, spacing } from '../theme';
+import { colors, font, radius, spacing, themedStyles } from '../theme';
 import { AppButton, AppInput, Card, LoadingView } from './controls';
 import { GradientScreen, KeyboardScreen } from './layout';
 import { FormMessage } from './pickers';
@@ -114,7 +114,7 @@ export function DeveloperGate() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   form: { alignItems: 'center', padding: spacing.xl },
   close: { position: 'absolute', top: spacing.xl, left: spacing.xl, padding: spacing.sm },
@@ -127,4 +127,4 @@ const styles = StyleSheet.create({
   sub: { color: colors.textSecondary, fontSize: font.md, marginTop: spacing.sm },
   deniedTitle: { color: colors.text, fontSize: font.xl, fontWeight: '900', marginTop: spacing.lg },
   deniedText: { color: colors.textSecondary, fontSize: font.md, marginTop: spacing.sm },
-});
+}));

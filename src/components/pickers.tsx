@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import React, { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { colors, font, radius, spacing } from '../theme';
+import { colors, font, radius, spacing, themedStyles } from '../theme';
 import { arabicDay, formatTimeAr, minutesToTime24, timeToMinutes, WEEK_DAYS } from '../lib/utils';
 
 const HOUR_OPTIONS = Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }));
@@ -199,7 +199,7 @@ export function FormMessage({ type, text }: { type: 'error' | 'success' | 'info'
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   timeHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   timePreview: {
     color: colors.cyan, fontSize: font.sm, fontWeight: '800',
@@ -258,4 +258,4 @@ const styles = StyleSheet.create({
     borderRadius: radius.full, backgroundColor: 'rgba(0,0,0,0.15)',
   },
   copyText: { fontSize: font.xs, fontWeight: '800' },
-});
+}));

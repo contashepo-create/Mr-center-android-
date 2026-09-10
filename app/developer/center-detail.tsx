@@ -19,7 +19,7 @@ import { planLabel } from '../../src/lib/billing';
 import type { ActivityLog, Center, Profile, Student, Subscription } from '../../src/lib/types';
 import { getSupabase } from '../../src/lib/supabase';
 import { arabicError, formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function CenterDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -194,7 +194,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   hero: { borderWidth: 1 },
   heroRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   heroName: { color: colors.text, fontSize: font.xl, fontWeight: '900', textAlign: 'right' },
@@ -219,4 +219,4 @@ const styles = StyleSheet.create({
   },
   studentName: { flex: 1, color: colors.text, fontSize: font.sm, fontWeight: '700', textAlign: 'right' },
   studentMeta: { color: colors.textMuted, fontSize: font.xs },
-});
+}));

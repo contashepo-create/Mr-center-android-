@@ -8,13 +8,14 @@ import React, { useCallback, useState } from 'react';
 import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppButton, AppInput, Card, EmptyState, ListItem, LoadingView, NoAccess, SheetHandle } from '../../src/components/controls';
 import { BackHeader, GradientScreen } from '../../src/components/layout';
+import { DetailSheet } from '../../src/components/DetailSheet';
 import { FormMessage } from '../../src/components/pickers';
 import { can } from '../../src/lib/staff';
 import { deleteAnnouncement, fetchAnnouncements, upsertAnnouncement } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import type { Announcement } from '../../src/lib/types';
 import { arabicError, formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function AnnouncementsScreen() {
   const { profile } = useSession();
@@ -30,6 +31,7 @@ export default function AnnouncementsScreen() {
   const [pinned, setPinned] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [viewing, setViewing] = useState<Announcement | null>(null);
 
   const load = useCallback(async () => {
     if (!centerId) return;
@@ -132,8 +134,9 @@ export default function AnnouncementsScreen() {
                   </View>
                 ) : null}
               </View>
-              <Pressable onPress={() => Alert.alert(item.title, item.body)}>
+              <Pressable onPress={() => setViewing(item)}>
                 <Text style={styles.annBody} numberOfLines={3}>{item.body}</Text>
+                <Text style={styles.annMore}>اضغط لعرض الإعلان كاملاً</Text>
               </Pressable>
               <View style={styles.annActions}>
                 <Pressable hitSlop={8} onPress={() => openEdit(item)} style={styles.miniBtn}>
@@ -149,6 +152,17 @@ export default function AnnouncementsScreen() {
           )}
         />
       )}
+
+      {/* عرض إعلان كامل بنافذة حديثة */}
+      <DetailSheet
+        visible={!!viewing}
+        onClose={() => setViewing(null)}
+        icon="megaphone"
+        tint={viewing?.pinned ? 'warning' : 'info'}
+        title={viewing?.title ?? ''}
+        meta={`نُشر ${formatDate(viewing?.created_at ?? '')}${viewing?.pinned ? ' · مثبت أعلى قائمة الطلاب' : ''}`}
+        body={viewing?.body ?? ''}
+      />
 
       {/* نموذج إعلان */}
       <Modal visible={formOpen} transparent animationType="slide" onRequestClose={() => setFormOpen(false)}>
@@ -185,7 +199,7 @@ export default function AnnouncementsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   addBtn: {
     width: 40, height: 40, borderRadius: radius.full,
     backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
@@ -204,6 +218,7 @@ const styles = StyleSheet.create({
   pinPill: { backgroundColor: colors.warningBg, borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 4 },
   pinPillText: { color: colors.warning, fontSize: font.xs, fontWeight: '800' },
   annBody: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', lineHeight: 22, marginTop: spacing.md },
+  annMore: { color: colors.cyan, fontSize: font.xs, fontWeight: '700', textAlign: 'left', marginTop: spacing.sm },
   annActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   miniText: { fontSize: font.xs, fontWeight: '800' },
   miniBtn: {
@@ -225,4 +240,4 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md, paddingVertical: spacing.xs,
   },
   pinText: { color: colors.text, fontSize: font.md, fontWeight: '600' },
-});
+}));

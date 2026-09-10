@@ -8,23 +8,33 @@ import React, { useEffect, useState } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { AppButton, Card, LoadingView } from '../src/components/controls';
 import { BackHeader, GradientScreen, KeyboardScreen } from '../src/components/layout';
+import { ThemeToggleRow } from '../src/components/ThemeToggle';
 import { fetchPublicConfig } from '../src/lib/supabase';
 import type { PublicConfig } from '../src/lib/types';
-import { colors, font, radius, spacing } from '../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../src/theme';
 
 const APP_FEATURES: { icon: keyof typeof Ionicons.glyphMap; title: string; sub: string }[] = [
-  { icon: 'people', title: 'إدارة الطلاب والمجموعات', sub: 'تسجيل وبحث وفلاتر وحالات وعضويات متعددة' },
-  { icon: 'checkmark-done', title: 'الحضور الذكي', sub: 'تسجيل جماعي + مسح باركود QR يومي آمن' },
-  { icon: 'wallet', title: 'المدفوعات والمستحقات', sub: 'تسعير شهري/أسبوعي/بالحصة + تحصيل وتقارير' },
-  { icon: 'document-text', title: 'اختبارات إلكترونية', sub: 'اختياري وصح/خطأ ومقالي بتصحيح تلقائي ويدوي' },
-  { icon: 'stats-chart', title: 'تقارير شاملة', sub: 'حضور وتحصيل ودرجات + تقرير فردي PDF' },
-  { icon: 'notifications', title: 'إشعارات فورية مجانية', sub: 'بث جماعي + تنبيه قبل الحصة بساعة' },
-  { icon: 'logo-whatsapp', title: 'تكامل واتساب', sub: 'تقارير وتنبيهات ومستحقات مباشرة' },
-  { icon: 'briefcase', title: 'فريق العمل', sub: 'مدرسون ومديرون وسكرتارية بصلاحيات دقيقة' },
-  { icon: 'calendar', title: 'جدول أسبوعي', sub: 'مواعيد كل مجموعة + تنبيه تعارض المواعيد' },
-  { icon: 'library', title: 'مكتبة السنتر', sub: 'لوحة شرف وملفات وروابط واستبيانات' },
-  { icon: 'shield-checkmark', title: 'عزل كامل', sub: 'كل سنتر معزول ببياناته + اشتراكات وباقات' },
-  { icon: 'qr-code', title: 'باركود السنتر', sub: 'للطباعة والمشاركة لتسجيل الطلاب' },
+  { icon: 'people', title: 'إدارة الطلاب', sub: 'تسجيل وبحث وفلاتر (نشط/موقوف/مؤرشف) وملف شامل لكل طالب' },
+  { icon: 'albums', title: 'المجموعات والصفوف', sub: 'مجموعات بمدرسين وتسعير متنوع وعدّاد طلاب تلقائي' },
+  { icon: 'checkmark-done', title: 'الحضور الذكي', sub: 'كشف جماعي يدوي + مسح باركود QR يومي آمن مضاد للنسخ' },
+  { icon: 'scan', title: 'مسح باركود السنتر', sub: 'باركود ثابت قابل للطباعة لتسجيل الطلاب بسرعة' },
+  { icon: 'wallet', title: 'المدفوعات والمستحقات', sub: 'تسعير شهري/أسبوعي/بالحصة + تحصيل جزئي وكشف حساب' },
+  { icon: 'document-text', title: 'اختبارات إلكترونية', sub: 'اختياري وصح/خطأ ومقالي بمؤقت وتصحيح تلقائي ويدوي' },
+  { icon: 'star', title: 'الدرجات والتقييم', sub: 'درجات يدوية بالشهر والصف مع متوسطات وتقارير' },
+  { icon: 'stats-chart', title: 'تقارير شاملة PDF', sub: 'تقارير شهرية (حضور/تحصيل/درجات) + تقرير فردي كامل' },
+  { icon: 'notifications', title: 'إشعارات فورية مجانية', sub: 'بث جماعي (الكل/صف/مجموعة/طالب) مع تتبع المقروء' },
+  { icon: 'logo-whatsapp', title: 'تكامل واتساب', sub: 'تقارير حضور ومستحقات وتنبيهات مباشرة للطالب وولي الأمر' },
+  { icon: 'briefcase', title: 'فريق عمل بصلاحيات', sub: 'مدرس/مدير/سكرتير — تفعيل بيدك و10 صلاحيات دقيقة لكل فرد' },
+  { icon: 'school', title: 'مدرس خصوصي مستقل', sub: 'نفس الوظائف كاملة بلا فريق وحتى 200 طالب' },
+  { icon: 'calendar', title: 'جدول أسبوعي', sub: 'مواعيد كل مجموعة + تنبيه تعارض المواعيد + PDF' },
+  { icon: 'library', title: 'مكتبة السنتر', sub: 'لوحة شرف وملفات وروابط مهمة تظهر لطلابك' },
+  { icon: 'list', title: 'استبيانات وطلبات', sub: 'آراء الطلاب بنتائج فورية + استفسارات بنظام رد وحالات' },
+  { icon: 'card', title: 'باقات احترافية', sub: 'تجريبية 14 يوماً كاملة المزايا ثم شامل/متوسط/خصوصي بأسعار واضحة' },
+  { icon: 'receipt', title: 'سجل عمليات ومعاملات', sub: 'من فعل ماذا ومتى + سجل طلبات الترقية والاشتراكات' },
+  { icon: 'business', title: 'تعدد سناتر معزول', sub: 'كل سنتر ببياناته خلف خادم Supabase (RLS) بلا أي تداخل' },
+  { icon: 'cloudy-night', title: 'وضع فاتح وداكن', sub: 'بدّل مظهر التطبيق كاملاً بضغطة ويُحفظ اختيارك' },
+  { icon: 'download', title: 'تحديث ذاتي', sub: 'تحديثات مباشرة عبر كلاود فلير بلا متجر مع إشعار ما الجديد' },
+  { icon: 'shield-checkmark', title: 'أمان على الخادم', sub: 'عزل RLS كامل + بريد موثوق + أرقام فريدة على مستوى النظام' },
 ];
 
 export default function AboutScreen() {
@@ -78,6 +88,13 @@ export default function AboutScreen() {
               ))}
             </Card>
 
+            <Card style={{ marginTop: spacing.md }}>
+              <Text style={styles.contactTitle}>مظهر التطبيق</Text>
+              <View style={{ marginTop: spacing.md, marginBottom: spacing.xs }}>
+                <ThemeToggleRow />
+              </View>
+            </Card>
+
             {(cfg.contact_whatsapp || cfg.contact_email) ? (
               <Card style={{ marginTop: spacing.md }}>
                 <Text style={styles.contactTitle}>تواصل معنا</Text>
@@ -116,7 +133,7 @@ export default function AboutScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   logoBadge: {
     width: 64, height: 64, borderRadius: radius.lg,
     backgroundColor: colors.cyan + '22', borderWidth: 1, borderColor: colors.cyan + '55',
@@ -140,4 +157,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted, fontSize: font.xs, textAlign: 'center',
     marginTop: spacing.xxl, lineHeight: 18,
   },
-});
+}));

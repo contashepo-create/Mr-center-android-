@@ -6,18 +6,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { AppButton, Card, EmptyState, LoadingView, NoAccess } from '../../src/components/controls';
-import { GradientScreen, ScreenHeader } from '../../src/components/layout';
-import { OptionPicker } from '../../src/components/pickers';
-import { can, useTeacherGroupIds } from '../../src/lib/staff';
+import { AppButton, Card, EmptyState, LoadingView, NoAccess } from '../../../src/components/controls';
+import { GradientScreen, ScreenHeader } from '../../../src/components/layout';
+import { OptionPicker } from '../../../src/components/pickers';
+import { can, useTeacherGroupIds } from '../../../src/lib/staff';
 import {
   fetchAttendanceForSession, fetchGroupMembers, fetchGroups,
   findSession, getOrCreateSession, saveAttendance,
-} from '../../src/lib/api';
-import { useSession } from '../../src/lib/session';
-import type { AttendanceStatus, Group, SessionRecord, Student } from '../../src/lib/types';
-import { arabicError, formatDate, shiftDateIso, todayIso } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+} from '../../../src/lib/api';
+import { useSession } from '../../../src/lib/session';
+import type { AttendanceStatus, Group, SessionRecord, Student } from '../../../src/lib/types';
+import { arabicError, formatDate, shiftDateIso, todayIso } from '../../../src/lib/utils';
+import { colors, font, radius, spacing, themedStyles } from '../../../src/theme';
 
 interface Row {
   student: Student;
@@ -267,7 +267,7 @@ function StatusButton({ label, icon, color, active, onPress }: {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   activeNote: {
     color: colors.textMuted, fontSize: font.xs, textAlign: 'center',
     marginBottom: spacing.sm, paddingHorizontal: spacing.lg,
@@ -323,4 +323,4 @@ const styles = StyleSheet.create({
     padding: spacing.lg, paddingBottom: spacing.xl,
     backgroundColor: colors.bgSoft, borderTopWidth: 1, borderTopColor: colors.border,
   },
-});
+}));

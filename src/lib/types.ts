@@ -204,14 +204,31 @@ export interface MySubscription {
   center_status: string;
 }
 
-export type ExamQuestionType = 'mcq' | 'tf' | 'essay';
+export type ExamQuestionType =
+  | 'mcq'       // اختيار من متعدد — تصحيح تلقائي
+  | 'multi'     // متعدد الإجابات — تلقائي (مصفوفة فهارس)
+  | 'tf'        // صح / خطأ — تلقائي
+  | 'complete'  // أكمل الفراغ — تلقائي (مطابقة نص بعد التطبيع)
+  | 'match'     // وصل — تلقائي (فهرس اليمنى لكل بند يسار)
+  | 'correct'   // صحّح الخطأ — يدوي + نموذج إرشادي (المطابقة التامة تعتمد آلياً)
+  | 'essay'     // مقالي — يدوي
+  | 'short';    // إجابة قصيرة — يدوي
+
+export interface ExamPair { l: string; r: string }
 
 export interface ExamQuestion {
   q: string;
   type: ExamQuestionType;
   choices: string[];
   marks: number;
+  /** الإجابة النموذجية (أكمل/صحّح) — تُخزَّن مطبَّعة في answers[i] */
+  answer?: string;
+  /** أزواج التوصيل (وصل) */
+  pairs?: ExamPair[];
 }
+
+/** قيمة إجابة سؤال: فهرس / مصفوفة فهارس / نص / null لليدوي بلا نموذج */
+export type ExamAnswer = number | number[] | string | null;
 
 export interface AppExam {
   id: string;
@@ -221,7 +238,7 @@ export interface AppExam {
   grade_id: string | null;
   duration_minutes: number;
   questions: ExamQuestion[];
-  answers: number[];
+  answers: ExamAnswer[];
   total_score: number;
   is_published: boolean;
   created_at: string;
@@ -239,12 +256,22 @@ export interface PublishedExam {
   created_at: string;
 }
 
+/** رسالة قناة الدعم (مالك السنتر ↔ المطور) */
+export interface SupportMessage {
+  id: string;
+  center_id: string;
+  sender_role: 'owner' | 'developer';
+  sender_name: string;
+  body: string;
+  created_at: string;
+}
+
 export interface ExamAttempt {
   id: string;
   center_id: string;
   exam_id: string;
   student_id: string;
-  answers: (number | string | null)[];
+  answers: ExamAnswer[];
   score: number;
   max_score: number;
   status: 'graded' | 'pending_review';

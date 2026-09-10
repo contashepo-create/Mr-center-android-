@@ -16,7 +16,7 @@ import {
   normalizeCenterCode, normalizePhone,
 } from '../../src/lib/utils';
 import { FormMessage, OptionPicker } from '../../src/components/pickers';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 type CodeState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
 
@@ -237,14 +237,14 @@ export default function RegisterCenterScreen() {
         </Card>
 
         <Text style={styles.footer}>
-          بإنشائك الحساب ستحصل على اشتراك تجريبي 7 أيام بمزايا كاملة، وبعدها تطلب الترقية من المطور.
+          بإنشائك الحساب ستحصل على اشتراك تجريبي 14 يوماً بمزايا كاملة، وبعدها تطلب الترقية من المطور.
         </Text>
       </KeyboardScreen>
     </GradientScreen>
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   kindNote: {
     flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start',
     backgroundColor: colors.infoBg, borderWidth: 1, borderColor: colors.info + '44',
@@ -265,4 +265,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted, fontSize: font.sm, textAlign: 'center',
     marginTop: spacing.xl, lineHeight: 20,
   },
-});
+}));

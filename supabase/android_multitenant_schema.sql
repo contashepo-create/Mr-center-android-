@@ -403,7 +403,7 @@ BEGIN
 
   -- اشتراك تجريبي ٧ أيام بمزايا كاملة — بعده يطلب السنتر الترقية من المطور
   INSERT INTO public.center_subscriptions (center_id, plan_type, starts_on, ends_on, status, notes)
-  VALUES (v_center_id, 'trial', CURRENT_DATE, CURRENT_DATE + 7, 'active', 'اشتراك تجريبي عند التسجيل');
+  VALUES (v_center_id, 'trial', CURRENT_DATE, CURRENT_DATE + 14, 'active', 'اشتراك تجريبي عند التسجيل');
 
   RETURN v_center_id;
 END;
@@ -959,8 +959,11 @@ BEGIN
 END;
 $$;
 
--- تسليم إجابة امتحان: تصحيح تلقائي (اختياري/صح-خطأ بدرجات) + المقالي للمراجعة
--- أنواع الأسئلة: mcq (اختيار من 4) · tf (صح/خطأ) · essay (مقالي — قيد مراجعة المعلم)
+-- تسليم إجابة امتحان: تصحيح تلقائي بمساواة JSON عامة + اليدوي للمراجعة
+-- الأنواع الثمانية: mcq (فهرس) · multi (مصفوفة فهارس مرتبة) · tf (0/1)
+--                   complete (نص مطبَّع) · match (مصفوفة فهارس اليمنى بترتيب اليسار)
+--                   correct/essay/short (يدوي — قيد مراجعة المعلم؛
+--                   و«صحّح» إن طابق نموذجه حرفياً تُحسب آلياً)
 CREATE OR REPLACE FUNCTION public.submit_exam_attempt(p_exam_id TEXT, p_answers JSONB)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -991,7 +994,7 @@ BEGIN
     v_type := COALESCE(v_q ->> 'type', 'mcq');
     v_marks := COALESCE(NULLIF(v_q ->> 'marks', '')::NUMERIC, 1);
     v_total_marks := v_total_marks + v_marks;
-    IF v_type = 'essay' THEN
+    IF v_type IN ('essay', 'correct', 'short') THEN
       v_has_essay := true;
     ELSIF (v_exam.answers -> i) IS NOT NULL
       AND (v_exam.answers -> i) = (COALESCE(p_answers, '[]'::jsonb) -> i) THEN
@@ -1202,6 +1205,34 @@ BEGIN
 END;
 $$;
 GRANT EXECUTE ON FUNCTION public.get_my_notifications() TO authenticated;
+
+-- ============================================================================
+-- ٦/هـ) قناة الدعم: رسائل ثنائية بين مالك السنتر والمطور
+-- (المالك يقرأ ويرسل لسنتره فقط — المطور يرى الكل ويرد)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.support_messages (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id   UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  sender_role TEXT NOT NULL CHECK (sender_role IN ('owner','developer')),
+  sender_name TEXT NOT NULL DEFAULT '',
+  body        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_support_center ON public.support_messages(center_id, created_at);
+ALTER TABLE public.support_messages ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "support_owner_read" ON public.support_messages;
+CREATE POLICY "support_owner_read" ON public.support_messages FOR SELECT TO authenticated
+  USING (public.admin_owns_center(center_id));
+DROP POLICY IF EXISTS "support_owner_insert" ON public.support_messages;
+CREATE POLICY "support_owner_insert" ON public.support_messages FOR INSERT TO authenticated
+  WITH CHECK (public.admin_owns_center(center_id)
+              AND sender_role = 'owner'
+              AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS "support_super_admin" ON public.support_messages;
+CREATE POLICY "support_super_admin" ON public.support_messages FOR ALL TO authenticated
+  USING (public.my_role() = 'super_admin')
+  WITH CHECK (public.my_role() = 'super_admin');
 
 -- ============================================================================
 -- ٦/و) الباقات: طلبات الترقية + سجل المعاملات + سجل العمليات

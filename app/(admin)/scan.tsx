@@ -21,7 +21,7 @@ import { useSession } from '../../src/lib/session';
 import { decodeStudentQr, isQrFresh } from '../../src/lib/qr';
 import type { Due, Student } from '../../src/lib/types';
 import { arabicError, formatMoney, todayIso } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 type Phase = 'scan' | 'working' | 'result' | 'denied';
 
@@ -347,7 +347,7 @@ export default function ScanAttendanceScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   centerFill: { flex: 1, justifyContent: 'center' },
   permIcon: {
     width: 64, height: 64, borderRadius: radius.full, alignSelf: 'center',
@@ -408,4 +408,4 @@ const styles = StyleSheet.create({
   markedText: { color: colors.success, fontSize: font.xs, fontWeight: '800' },
   duesRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
   duesText: { color: colors.text, fontSize: font.sm, fontWeight: '700', textAlign: 'right', flex: 1 },
-});
+}));

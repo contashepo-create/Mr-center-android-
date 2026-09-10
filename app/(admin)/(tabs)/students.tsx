@@ -10,17 +10,17 @@ import {
 } from 'react-native';
 import {
   AppButton, AppInput, Card, EmptyState, LoadingView, SheetHandle,
-} from '../../src/components/controls';
-import { GradientScreen, ScreenHeader } from '../../src/components/layout';
-import { FormMessage, OptionPicker } from '../../src/components/pickers';
+} from '../../../src/components/controls';
+import { GradientScreen, ScreenHeader } from '../../../src/components/layout';
+import { FormMessage, OptionPicker } from '../../../src/components/pickers';
 import {
   deleteStudent, fetchGrades, fetchGroups, fetchStudents, upsertStudent,
-} from '../../src/lib/api';
-import { useSession } from '../../src/lib/session';
-import type { Grade, Group, Student } from '../../src/lib/types';
-import { isOwner } from '../../src/lib/staff';
-import { arabicError, isValidPhone, normalizePhone } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+} from '../../../src/lib/api';
+import { useSession } from '../../../src/lib/session';
+import type { Grade, Group, Student } from '../../../src/lib/types';
+import { isOwner, useTeacherGroupIds } from '../../../src/lib/staff';
+import { arabicError, isValidPhone, normalizePhone } from '../../../src/lib/utils';
+import { colors, font, radius, spacing, themedStyles } from '../../../src/theme';
 
 export default function StudentsScreen() {
   const { profile } = useSession();
@@ -99,11 +99,17 @@ export default function StudentsScreen() {
   // المدرس: عرض وفتح ملفات فقط — الإضافة والتعديل والحذف للمالك
   const canManage = isOwner(profile);
 
-  const displayed = students.filter((s) => {
-    if (filterStatus !== 'all' && s.status !== filterStatus) return false;
-    if (filterGroup !== 'all' && s.group_id !== filterGroup) return false;
-    return true;
-  });
+  // المدرس: يرى طلاب مجموعاته المسندة فقط (السكرتير/المدير/المالك: الكل)
+  const teacherScope = useTeacherGroupIds();
+
+  const displayed = students
+    .filter((s) => {
+      if (teacherScope && (!s.group_id || !teacherScope.includes(s.group_id))) return false;
+      if (filterStatus !== 'all' && s.status !== filterStatus) return false;
+      if (filterGroup !== 'all' && s.group_id !== filterGroup) return false;
+      return true;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, 'ar')); // ترتيب أبجدي دائماً
 
   const openAdd = () => {
     setEditing(null);
@@ -214,11 +220,11 @@ export default function StudentsScreen() {
       <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.md }}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
           <FilterChip
-            label={`الكل (${students.length})`}
+            label={`الكل (${teacherScope ? students.filter((s) => s.group_id && teacherScope.includes(s.group_id)).length : students.length})`}
             active={filterGroup === 'all'}
             onPress={() => setFilterGroup('all')}
           />
-          {groups.map((g) => (
+          {(teacherScope ? groups.filter((g) => teacherScope.includes(g.id)) : groups).map((g) => (
             <FilterChip
               key={g.id}
               label={`${g.name} (${students.filter((s) => s.group_id === g.id).length})`}
@@ -229,13 +235,19 @@ export default function StudentsScreen() {
         </ScrollView>
       </View>
 
+      {!loading && students.length > 0 ? (
+        <Text style={styles.countLine}>
+          عرض {displayed.length} من {teacherScope ? students.filter((s) => s.group_id && teacherScope.includes(s.group_id)).length : students.length} طالب
+        </Text>
+      ) : null}
+
       {loading ? (
         <LoadingView message="جاري تحميل الطلاب..." />
       ) : displayed.length === 0 ? (
         <EmptyState
           icon="people-outline"
-          title={search || filterGroup !== 'all' ? 'لا توجد نتائج مطابقة' : 'لا يوجد طلاب بعد'}
-          message={search || filterGroup !== 'all' ? 'جرّب بحثاً مختلفاً أو غيّر فلتر المجموعة' : 'أضف طلابك يدوياً، أو شارك كود السنتر ليسجّلوا بأنفسهم'}
+          title={search || filterGroup !== 'all' || filterStatus !== 'all' ? 'لا توجد نتائج مطابقة' : 'لا يوجد طلاب بعد'}
+          message={search || filterGroup !== 'all' || filterStatus !== 'all' ? 'جرّب بحثاً مختلفاً أو غيّر الفلاتر' : 'أضف طلابك يدوياً، أو شارك كود السنتر ليسجّلوا بأنفسهم'}
           action={<AppButton title="إضافة طالب" icon="person-add" small onPress={openAdd} />}
         />
       ) : (
@@ -332,11 +344,12 @@ function StudentCard({ student, groupLabel, gradeLabel, canManage, onOpen, onEdi
   onOpen: () => void; onEdit: () => void; onDelete: () => void;
 }) {
   const suspended = student.status !== 'active';
+  const initial = (student.name ?? '؟').trim().charAt(0);
   return (
     <Card style={styles.studentCard}>
       <Pressable onPress={onOpen} style={styles.studentMain}>
-        <View style={[styles.studentIcon, suspended && { opacity: 0.5 }]}>
-          <Ionicons name="person" size={20} color={suspended ? colors.textMuted : colors.info} />
+        <View style={[styles.avatar, suspended && { opacity: 0.55 }]}>
+          <Text style={styles.avatarText}>{initial}</Text>
         </View>
         <View style={{ flex: 1 }}>
           <View style={styles.studentTitleRow}>
@@ -351,10 +364,18 @@ function StudentCard({ student, groupLabel, gradeLabel, canManage, onOpen, onEdi
               </View>
             ) : null}
           </View>
-          <Text style={styles.studentMeta} numberOfLines={1}>
-            {groupLabel}{gradeLabel ? ` · ${gradeLabel}` : ''}
-          </Text>
-          {student.phone ? <Text style={styles.studentPhone}>{student.phone}</Text> : null}
+          <View style={styles.metaRow}>
+            <Ionicons name="albums-outline" size={13} color={colors.textMuted} />
+            <Text style={styles.studentMeta} numberOfLines={1}>
+              {groupLabel}{gradeLabel ? ` · ${gradeLabel}` : ''}
+            </Text>
+          </View>
+          {student.phone ? (
+            <View style={styles.metaRow}>
+              <Ionicons name="call-outline" size={13} color={colors.textMuted} />
+              <Text style={styles.studentPhone}>{student.phone}</Text>
+            </View>
+          ) : null}
         </View>
         <Ionicons name="chevron-back" size={18} color={colors.textMuted} />
       </Pressable>
@@ -374,7 +395,18 @@ function StudentCard({ student, groupLabel, gradeLabel, canManage, onOpen, onEdi
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
+  countLine: {
+    color: colors.textMuted, fontSize: font.xs, textAlign: 'right',
+    paddingHorizontal: spacing.lg, marginBottom: spacing.sm, fontWeight: '700',
+  },
+  avatar: {
+    width: 46, height: 46, borderRadius: radius.full,
+    backgroundColor: colors.primary + '26', borderWidth: 1, borderColor: colors.primary + '55',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  avatarText: { color: colors.text, fontSize: font.lg, fontWeight: '900' },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   addBtn: {
     width: 40, height: 40, borderRadius: radius.full,
     backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
@@ -435,4 +467,4 @@ const styles = StyleSheet.create({
     color: colors.text, fontSize: font.lg, fontWeight: '900',
     textAlign: 'center', marginBottom: spacing.lg,
   },
-});
+}));

@@ -112,7 +112,7 @@ check('رسالة الكود المكرر (center_code_taken)', has('EXCEPTION \
 check('رسالة الهاتف المكرر (phone_taken)', has('EXCEPTION \'phone_taken\''));
 check('رفض السنتر الموقوف عند تسجيل الطالب', has('EXCEPTION \'center_suspended\''));
 check('إنشاء اشتراك تجريبي تلقائي للسنتر الجديد', has('اشتراك تجريبي'));
-check('الاشتراك التجريبي 7 أيام بخطة trial', has('CURRENT_DATE + 7') && has("'trial'"));
+check('الاشتراك التجريبي 14 يوماً بخطة trial', has('CURRENT_DATE + 14') && has("'trial'"));
 check('منتجات الباقات في القيد', has("'center_full','center_medium','solo_teacher'")); 
 check('حظر تكرار التسجيل لنفس الحساب (already_registered)', has('EXCEPTION \'already_registered\''));
 check('الطوابع الزمنية TIMESTAMPTZ لا TEXT (منع خطأ created_at)', !/v_now TEXT/.test(sql));
@@ -144,6 +144,9 @@ check('رمز الدفع profiles.push_token', has('ADD COLUMN IF NOT EXISTS pus
 check('طلبات الترقية + سجل العمليات + RLS', ['subscription_requests', 'activity_log', 'subreq_owner_all', 'activity_staff_insert'].every((s) => has(s)));
 check('حدود الباقات خادمياً (فريق + 200 طالب)', has('staff_limit_reached') && has('students_limit_reached') && has('trg_staff_limit_check')); 
 check('قناة owners للمطور (قيد + سياسات)', has("'owners'") && has('app_reads_owner_insert') && has('app_reads_owner_read'));
+check('جدول قناة الدعم (مالك ↔ مطور)', has('CREATE TABLE IF NOT EXISTS public.support_messages'));
+check('سياسات قناة الدعم الثلاث', has('"support_owner_read"') && has('"support_owner_insert"') && has('"support_super_admin"'));
+check('الأنواع اليدوية للامتحانات تُراجع خادمياً', has("v_type IN ('essay', 'correct', 'short')"));
 check('حالة مراجعة المحاولة (pending_review)', has('pending_review'));
 check('تصحيح بدرجات لكل سؤال وأنواع أسئلة', has('mcq') && has('essay'));
 check('get_published_exams للمصادقين فقط',

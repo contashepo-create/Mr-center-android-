@@ -12,7 +12,8 @@ import { isOwner, isStaff } from '../src/lib/staff';
 import { getSupabase } from '../src/lib/supabase';
 import { GradientScreen } from '../src/components/layout';
 import { UpdateManager } from '../src/components/UpdateManager';
-import { colors, font, spacing } from '../src/theme';
+import { ThemeProvider, useTheme } from '../src/lib/themeContext';
+import { colors, font, spacing, themedStyles } from '../src/theme';
 
 function BootSplash() {
   return (
@@ -76,7 +77,7 @@ function RouterGuard() {
     } else if (isOwner(profile) || isStaff(profile)) {
       const allowed = ['dashboard', 'students', 'groups', 'attendance', 'more', 'payments',
         'announcements', 'grades-list', 'admin-settings', 'student', 'about', 'scan',
-        'exams', 'inquiries', 'surveys', 'library', 'schedule', 'reports', 'guide', 'whatsapp', 'notifications', 'dev-notices', 'teachers', 'subscription', 'activity'];
+        'exams', 'inquiries', 'surveys', 'library', 'schedule', 'reports', 'guide', 'whatsapp', 'notifications', 'dev-notices', 'teachers', 'subscription', 'activity', 'support'];
       if (!root || root === 'index' || inAuth || inDev || !allowed.includes(root)) {
         router.replace('/dashboard');
       }
@@ -116,16 +117,26 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <SessionProvider>
-          <RouterGuard />
-        </SessionProvider>
+        <ThemeProvider>
+          {/* AppShell يستهلك الثيم حتى يعاد رسم الشجرة كاملة عند التبديل */}
+          <AppShell />
+        </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
 
-const styles = StyleSheet.create({
+function AppShell() {
+  useTheme();
+  return (
+    <SessionProvider>
+      <RouterGuard />
+    </SessionProvider>
+  );
+}
+
+const styles = themedStyles(() => StyleSheet.create({
   boot: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   bootLogo: { width: 110, height: 110, borderRadius: 28 },
   bootTitle: { color: colors.text, fontSize: font.xxl, fontWeight: '800', marginTop: spacing.lg },
-});
+}));

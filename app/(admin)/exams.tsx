@@ -1,6 +1,7 @@
 // ============================================================
-// الاختبارات الإلكترونية: إنشاء أسئلة اختيار من متعدد + نشر +
-// متابعة المحاولات والدرجات + نسخة ورقية للطباعة (PDF)
+// الاختبارات الإلكترونية: 8 أنواع أسئلة (اختياري/متعدد/صح-خطأ/
+// أكمل/وصل/صحّح/مقالي/قصير) + قوالب + نشر + نتائج وتصحيح يدوي
+// + نسخة ورقية PDF — التصحيح التلقائي خادمي بمساواة JSON.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -16,30 +17,55 @@ import {
   gradeAttemptManually, toggleExamPublished, upsertExam,
 } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
-import type { AppExam, ExamAttempt, ExamQuestionType, Grade, Student } from '../../src/lib/types';
-import { arabicError, examMarksTotal, formatDate, validateExamDraft } from '../../src/lib/utils';
+import type { AppExam, ExamAnswer, ExamAttempt, ExamQuestionType, Grade, Student } from '../../src/lib/types';
+import {
+  arabicError, examMarksTotal, EXAM_TYPE_LABEL, formatDate, isManualExamType,
+  normalizeAnswerText, validateExamDraft,
+} from '../../src/lib/utils';
 import { buildReportHtml, shareReportPdf } from '../../src/lib/report';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
-interface DraftQ { q: string; type: ExamQuestionType; choices: string[]; correct: number; marks: number }
+interface DraftQ {
+  q: string;
+  type: ExamQuestionType;
+  choices: string[];
+  correct: number;                 // mcq / tf
+  corrects: number[];              // multi
+  answer: string;                  // complete / correct (نموذج)
+  pairs: { l: string; r: string }[]; // match
+  marks: number;
+}
+
+const padChoices = (c: string[] | undefined) => [...(c ?? []), '', '', '', ''].slice(0, 4);
 
 const blankQ = (type: ExamQuestionType = 'mcq'): DraftQ => ({
-  q: '', type, choices: type === 'tf' ? ['صح', 'خطأ'] : ['', '', '', ''], correct: 0, marks: 1,
+  q: '',
+  type,
+  choices: type === 'tf' ? ['صح', 'خطأ'] : type === 'mcq' || type === 'multi' ? ['', '', '', ''] : [],
+  correct: 0,
+  corrects: [],
+  answer: '',
+  pairs: type === 'match' ? [{ l: '', r: '' }, { l: '', r: '' }] : [],
+  marks: 1,
 });
 
 const TYPE_OPTIONS: { value: ExamQuestionType; label: string }[] = [
   { value: 'mcq', label: 'اختيار من متعدد' },
+  { value: 'multi', label: 'متعدد الإجابات' },
   { value: 'tf', label: 'صح / خطأ' },
-  { value: 'essay', label: 'مقالي (تصحيح يدوي)' },
+  { value: 'complete', label: 'أكمل الفراغ' },
+  { value: 'match', label: 'وصل' },
+  { value: 'correct', label: 'صحّح الخطأ' },
+  { value: 'essay', label: 'مقالي' },
+  { value: 'short', label: 'إجابة قصيرة' },
 ];
-const TYPE_LABEL: Record<ExamQuestionType, string> = {
-  mcq: 'اختياري', tf: 'صح/خطأ', essay: 'مقالي',
-};
 
-const STARTERS = [
-  { label: 'قصير: 10 دقائق', duration: 10, count: 5 },
-  { label: 'متوسط: 30 دقيقة', duration: 30, count: 10 },
-  { label: 'شامل: 60 دقيقة', duration: 60, count: 20 },
+const STARTERS: { label: string; duration: number; count: number; type: ExamQuestionType; marks: number }[] = [
+  { label: 'قصير 10د · 5 اختياري', duration: 10, count: 5, type: 'mcq', marks: 1 },
+  { label: 'متوسط 30د · 10 اختياري', duration: 30, count: 10, type: 'mcq', marks: 2 },
+  { label: 'شامل 60د · 20 اختياري', duration: 60, count: 20, type: 'mcq', marks: 2 },
+  { label: 'أكمل 10د · 5×2', duration: 10, count: 5, type: 'complete', marks: 2 },
+  { label: 'مختلط 20د · 4+2+2+2', duration: 20, count: 0, type: 'mcq', marks: 1 },
 ];
 
 export default function ExamsScreen() {
@@ -94,13 +120,30 @@ export default function ExamsScreen() {
     setGradeId(e.grade_id); setDuration(String(e.duration_minutes ?? 30));
     setTotal(e.total_score ? String(e.total_score) : ''); setPublished(!!e.is_published);
     setQuestions(e.questions.length > 0
-      ? e.questions.map((q, i) => ({
-        q: q.q,
-        type: (q.type ?? 'mcq') as ExamQuestionType,
-        choices: q.type === 'tf' ? ['صح', 'خطأ'] : [...(q.choices ?? []), '', '', '', ''].slice(0, 4),
-        correct: e.answers[i] ?? 0,
-        marks: Number((q as { marks?: number }).marks) || 1,
-      }))
+      ? e.questions.map((raw, i) => {
+        const type = (raw.type ?? 'mcq') as ExamQuestionType;
+        const a = e.answers[i];
+        const base = {
+          q: raw.q,
+          type,
+          marks: Number((raw as { marks?: number }).marks) || 1,
+          correct: 0, corrects: [] as number[], answer: '', pairs: [] as { l: string; r: string }[],
+        };
+        if (type === 'tf' || type === 'mcq') {
+          return { ...base, choices: type === 'tf' ? ['صح', 'خطأ'] : padChoices(raw.choices), correct: typeof a === 'number' ? a : 0 };
+        }
+        if (type === 'multi') {
+          return { ...base, choices: padChoices(raw.choices), corrects: Array.isArray(a) ? (a as number[]).filter((x) => typeof x === 'number') : [] };
+        }
+        if (type === 'complete' || type === 'correct') {
+          return { ...base, choices: [], answer: typeof a === 'string' ? a : '' };
+        }
+        if (type === 'match') {
+          const pairs = (raw.pairs ?? []);
+          return { ...base, choices: [], pairs: pairs.length >= 2 ? pairs.map((p) => ({ l: p.l, r: p.r })) : [{ l: '', r: '' }, { l: '', r: '' }] };
+        }
+        return { ...base, choices: [] }; // essay / short
+      })
       : [blankQ()]);
     setFormError(null); setFormOpen(true);
   };
@@ -115,6 +158,35 @@ export default function ExamsScreen() {
       return { ...q, choices };
     }));
   };
+  const setPair = (i: number, pi: number, side: 'l' | 'r', v: string) => {
+    setQuestions((prev) => prev.map((q, idx) => {
+      if (idx !== i) return q;
+      const pairs = q.pairs.map((p, x) => (x === pi ? { ...p, [side]: v } : p));
+      return { ...q, pairs };
+    }));
+  };
+
+  /** بناء الأسئلة والإجابات النهائية من المسودة */
+  const buildPayload = () => {
+    const cleanQuestions = questions.map((q) => {
+      const base = { q: q.q.trim(), type: q.type, marks: Number(q.marks) || 1 };
+      if (q.type === 'mcq' || q.type === 'multi') return { ...base, choices: q.choices.map((c) => c.trim()) };
+      if (q.type === 'tf') return { ...base, choices: ['صح', 'خطأ'] };
+      if (q.type === 'complete') return { ...base, choices: [], answer: normalizeAnswerText(q.answer) };
+      if (q.type === 'match') return { ...base, choices: [], pairs: q.pairs.map((p) => ({ l: p.l.trim(), r: p.r.trim() })) };
+      if (q.type === 'correct') return { ...base, choices: [], answer: q.answer.trim() };
+      return { ...base, choices: [] }; // essay / short
+    });
+    const answers: ExamAnswer[] = questions.map((q) => {
+      if (q.type === 'mcq' || q.type === 'tf') return q.correct;
+      if (q.type === 'multi') return [...q.corrects].sort((a, b) => a - b);
+      if (q.type === 'complete') return normalizeAnswerText(q.answer) || null;
+      if (q.type === 'match') return q.pairs.map((_, idx) => idx); // الهوية: اليسار k ↔ اليمين k
+      if (q.type === 'correct') return q.answer.trim() || null;    // نموذج إرشادي (المطابقة التامة = درجة آلية)
+      return null;                                                  // essay / short
+    });
+    return { cleanQuestions, answers };
+  };
 
   const save = async () => {
     setFormError(null);
@@ -122,12 +194,7 @@ export default function ExamsScreen() {
     const problem = validateExamDraft(questions);
     if (problem) return setFormError(problem);
     if (published && questions.length === 0) return setFormError('لا يمكن النشر بلا أسئلة');
-    const clean = questions.map((q) => ({
-      q: q.q.trim(),
-      type: q.type,
-      choices: q.type === 'mcq' ? q.choices.map((c) => c.trim()) : q.type === 'tf' ? ['صح', 'خطأ'] : [],
-      marks: Number(q.marks) || 1,
-    }));
+    const { cleanQuestions, answers } = buildPayload();
     const doSave = async () => {
       setBusy(true);
       try {
@@ -136,9 +203,9 @@ export default function ExamsScreen() {
           title, subject,
           grade_id: gradeId,
           duration_minutes: Number(duration) || 30,
-          total_score: Number(total) || examMarksTotal(clean),
-          questions: clean,
-          answers: questions.map((q) => (q.type === 'essay' ? -1 : q.correct)),
+          total_score: Number(total) || examMarksTotal(cleanQuestions),
+          questions: cleanQuestions,
+          answers,
           is_published: published,
         });
         setFormOpen(false);
@@ -179,13 +246,20 @@ export default function ExamsScreen() {
   };
 
   const togglePublish = async (e: AppExam) => {
-    // منع نشر امتحان ناقص (بلا أسئلة صالحة)
+    // منع نشر امتحان ناقص (بلا أسئلة صالحة كاملة بكل نوع)
     if (!e.is_published) {
       const bad = !e.questions || e.questions.length === 0
-        || e.questions.some((q) => !q.q?.trim?.()
-          || ((q.type ?? 'mcq') === 'mcq' && (q.choices ?? []).filter((c) => c?.trim?.()).length < 4));
+        || e.questions.some((q, i) => {
+          const t = q.type ?? 'mcq';
+          if (t === 'mcq') return (q.choices ?? []).filter((c) => c?.trim?.()).length < 4;
+          if (t === 'multi') return (q.choices ?? []).filter((c) => c?.trim?.()).length < 4
+            || !Array.isArray(e.answers?.[i]) || !(e.answers[i] as number[]).length;
+          if (t === 'complete') return typeof e.answers?.[i] !== 'string' || !(e.answers[i] as string).trim();
+          if (t === 'match') return (q.pairs ?? []).filter((p) => p.l?.trim() && p.r?.trim()).length < 2;
+          return false; // essay / short / correct (النموذج اختياري)
+        });
       if (bad) {
-        Alert.alert('لا يمكن النشر', 'الامتحان ناقص — عدّله وأكمل أسئلته واختياراتها أولاً');
+        Alert.alert('لا يمكن النشر', 'الامتحان ناقص — عدّله وأكمل أسئلته وإجاباتها أولاً');
         return;
       }
     }
@@ -210,17 +284,19 @@ export default function ExamsScreen() {
     ]);
   };
 
-  const paperRows = (qs: { q: string; type?: string; choices?: string[]; marks?: number }[]) =>
-    qs.map((q, i) => {
+  const paperRows = (exam: AppExam) =>
+    exam.questions.map((q, i) => {
       const t = q.type ?? 'mcq';
-      const body = t === 'essay'
-        ? '(إجابة مقالية: .......................)'
-        : (q.choices ?? []).map((c, ci) => `${ci + 1}) ${c}`).join(' — ');
-      return [
-        String(i + 1),
-        `${q.q} [${t === 'mcq' ? 'اختياري' : t === 'tf' ? 'صح/خطأ' : 'مقالي'} — ${Number(q.marks) || 1} درجة]`,
-        body,
-      ];
+      const label = EXAM_TYPE_LABEL[t] ?? t;
+      let body = '';
+      if (t === 'essay' || t === 'short' || t === 'correct') body = '(إجابة كتابية: .......................)';
+      else if (t === 'complete') body = '(أكمل: ..............................)';
+      else if (t === 'match') {
+        const pairs = q.pairs ?? [];
+        const rights = pairs.map((_, ri) => ri);
+        body = `صل: ${pairs.map((p) => p.l).join(' / ')} — مقابل: ${rights.map((ri) => pairs[ri].r).join(' / ')}`;
+      } else body = (q.choices ?? []).map((c, ci) => `${ci + 1}) ${c}`).join(' — ');
+      return [String(i + 1), `${q.q} [${label} — ${Number((q as { marks?: number }).marks) || 1} درجة]`, body];
     });
 
   const printPaper = async (e: AppExam) => {
@@ -228,16 +304,13 @@ export default function ExamsScreen() {
       const html = buildReportHtml(`امتحان: ${e.title}`, `${e.subject} — ${e.questions.length} أسئلة — ${e.duration_minutes} دقيقة — من ${e.total_score}`, [{
         title: 'الأسئلة (ورقية — بلا إجابات)',
         headers: ['م', 'السؤال', 'الاختيارات'],
-        rows: paperRows(e.questions),
+        rows: paperRows(e),
       }]);
       await shareReportPdf(html, `امتحان ${e.title}`);
     } catch (err) {
       Alert.alert('تعذر الطباعة', arabicError(err));
     }
   };
-
-  const previewQuestions: { q: string; type?: string; choices?: string[]; marks?: number }[] =
-    questions.map((q) => ({ q: q.q || '(بلا نص بعد)', type: q.type, choices: q.choices, marks: q.marks }));
 
   return (
     <GradientScreen>
@@ -256,7 +329,7 @@ export default function ExamsScreen() {
         <EmptyState
           icon="document-text-outline"
           title="لا توجد اختبارات بعد"
-          message="أنشئ اختبار اختيار من متعدد، انشره لطلابك، وتابع درجاتهم تلقائياً"
+          message="٨ أنواع أسئلة: اختياري، متعدد الإجابات، صح/خطأ، أكمل، وصل، صحّح الخطأ، مقالي، وإجابة قصيرة"
           action={<AppButton title="إنشاء اختبار" icon="add" small onPress={openAdd} />}
         />
       ) : (
@@ -275,7 +348,7 @@ export default function ExamsScreen() {
                   <Text style={styles.examTitle} numberOfLines={1}>{item.title}</Text>
                   <Text style={styles.examMeta}>
                     {item.subject || 'بدون مادة'} · {item.questions.length} سؤال
-                    {item.questions.some((q) => (q.type ?? 'mcq') === 'essay') ? ' (فيه مقالي)' : ''} · {item.duration_minutes} دقيقة · من {item.total_score} درجة
+                    {item.questions.some((q) => isManualExamType(q.type)) ? ' (فيه يدوي)' : ''} · {item.duration_minutes} دقيقة · من {item.total_score} درجة
                   </Text>
                 </View>
                 <View style={[styles.pubPill, { backgroundColor: item.is_published ? colors.successBg : colors.warningBg }]}>
@@ -341,7 +414,7 @@ export default function ExamsScreen() {
               </Pressable>
 
               <SectionTitle title="قوالب بداية سريعة" />
-              <View style={{ flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md }}>
                 {STARTERS.map((s) => (
                   <Pressable
                     key={s.label}
@@ -349,7 +422,17 @@ export default function ExamsScreen() {
                     onPress={() => {
                       const apply = () => {
                         setDuration(String(s.duration));
-                        setQuestions(Array.from({ length: s.count }, () => blankQ()));
+                        if (s.type === 'mcq' && s.count === 0) {
+                          // قالب مختلط: 4 اختياري + 2 صح/خطأ + 2 أكمل + 2 مقالي
+                          setQuestions([
+                            ...Array.from({ length: 4 }, () => ({ ...blankQ('mcq'), marks: 2 })),
+                            ...Array.from({ length: 2 }, () => ({ ...blankQ('tf'), marks: 1 })),
+                            ...Array.from({ length: 2 }, () => ({ ...blankQ('complete'), marks: 2 })),
+                            ...Array.from({ length: 2 }, () => ({ ...blankQ('essay'), marks: 3 })),
+                          ]);
+                          return;
+                        }
+                        setQuestions(Array.from({ length: s.count }, () => ({ ...blankQ(s.type), marks: s.marks })));
                       };
                       if (questions.some((q) => q.q.trim())) {
                         Alert.alert(
@@ -379,11 +462,11 @@ export default function ExamsScreen() {
                       </Pressable>
                     ) : null}
                   </View>
-                  <View style={styles.typeRow}>
+                  <View style={styles.typeGrid}>
                     {TYPE_OPTIONS.map((t) => (
                       <Pressable
                         key={t.value}
-                        onPress={() => setQ(i, { type: t.value, choices: t.value === 'tf' ? ['صح', 'خطأ'] : q.type === 'tf' ? ['', '', '', ''] : q.choices, correct: 0 })}
+                        onPress={() => setQ(i, { ...blankQ(t.value), q: q.q, marks: q.marks })}
                         style={[styles.typeChip, q.type === t.value && styles.typeChipActive]}
                       >
                         <Text style={[styles.typeText, q.type === t.value && styles.typeTextActive]}>{t.label}</Text>
@@ -391,6 +474,7 @@ export default function ExamsScreen() {
                     ))}
                   </View>
                   <AppInput placeholder="نص السؤال..." value={q.q} onChangeText={(v) => setQ(i, { q: v })} />
+
                   {q.type === 'mcq' ? q.choices.map((c, ci) => (
                     <Pressable key={ci} style={styles.choiceRow} onPress={() => setQ(i, { correct: ci })}>
                       <Ionicons
@@ -407,8 +491,41 @@ export default function ExamsScreen() {
                         />
                       </View>
                     </Pressable>
-                  )) : q.type === 'tf' ? (
-                    <View style={styles.typeRow}>
+                  )) : null}
+
+                  {q.type === 'multi' ? (
+                    <>
+                      {q.choices.map((c, ci) => (
+                        <Pressable
+                          key={ci}
+                          style={styles.choiceRow}
+                          onPress={() => setQ(i, {
+                            corrects: q.corrects.includes(ci)
+                              ? q.corrects.filter((x) => x !== ci)
+                              : [...q.corrects, ci].sort((a, b) => a - b),
+                          })}
+                        >
+                          <Ionicons
+                            name={q.corrects.includes(ci) ? 'checkbox' : 'square-outline'}
+                            size={20}
+                            color={q.corrects.includes(ci) ? colors.success : colors.textMuted}
+                          />
+                          <View style={{ flex: 1 }}>
+                            <AppInput
+                              placeholder={`اختيار ${ci + 1}`}
+                              value={c}
+                              onChangeText={(v) => setChoice(i, ci, v)}
+                              style={{ marginBottom: 0 }}
+                            />
+                          </View>
+                        </Pressable>
+                      ))}
+                      <Text style={styles.correctHint}>علّم كل الإجابات الصحيحة (اثنان أو أكثر) — الطالب يختارها كلها</Text>
+                    </>
+                  ) : null}
+
+                  {q.type === 'tf' ? (
+                    <View style={styles.typeGrid}>
                       {['صح', 'خطأ'].map((label, ci) => (
                         <Pressable
                           key={label}
@@ -419,12 +536,72 @@ export default function ExamsScreen() {
                         </Pressable>
                       ))}
                     </View>
-                  ) : (
-                    <Text style={styles.correctHint}>سؤال مقالي — يجيب الطالب كتابةً وتصححه أنت يدوياً من النتائج</Text>
-                  )}
-                  {q.type !== 'essay' ? (
-                    <Text style={styles.correctHint}>اضغط الدائرة أمام الإجابة الصحيحة</Text>
                   ) : null}
+
+                  {q.type === 'complete' ? (
+                    <>
+                      <AppInput
+                        label="الإجابة النموذجية"
+                        icon="checkmark-done"
+                        placeholder="ما يجب أن يكتبه الطالب في الفراغ"
+                        value={q.answer}
+                        onChangeText={(v) => setQ(i, { answer: v })}
+                      />
+                      <Text style={styles.correctHint}>تصحيح تلقائي بمطابقة النص (يُتجاهل التشكيل والهمزات والمسافات)</Text>
+                    </>
+                  ) : null}
+
+                  {q.type === 'match' ? (
+                    <>
+                      {q.pairs.map((p, pi) => (
+                        <View key={pi} style={styles.pairRow}>
+                          <View style={{ flex: 1 }}>
+                            <AppInput placeholder={`بند ${pi + 1} (يسار)`} value={p.l} onChangeText={(v) => setPair(i, pi, 'l', v)} style={{ marginBottom: 0 }} />
+                          </View>
+                          <Ionicons name="arrow-back" size={16} color={colors.textMuted} />
+                          <View style={{ flex: 1 }}>
+                            <AppInput placeholder={`يقابله (يمين)`} value={p.r} onChangeText={(v) => setPair(i, pi, 'r', v)} style={{ marginBottom: 0 }} />
+                          </View>
+                          {q.pairs.length > 2 ? (
+                            <Pressable hitSlop={8} onPress={() => setQ(i, { pairs: q.pairs.filter((_, x) => x !== pi) })}>
+                              <Ionicons name="close-circle" size={18} color={colors.danger} />
+                            </Pressable>
+                          ) : null}
+                        </View>
+                      ))}
+                      {q.pairs.length < 6 ? (
+                        <AppButton
+                          title="+ إضافة زوج"
+                          small
+                          variant="outline"
+                          onPress={() => setQ(i, { pairs: [...q.pairs, { l: '', r: '' }] })}
+                        />
+                      ) : null}
+                      <Text style={styles.correctHint}>الطالب يصل كل بند يسار بما يقابله يميناً — الترتيب يُبعثر تلقائياً عنده وتصحيح تلقائي</Text>
+                    </>
+                  ) : null}
+
+                  {q.type === 'correct' ? (
+                    <>
+                      <AppInput
+                        label="التصحيح الصحيح (إرشاد لك)"
+                        icon="create"
+                        placeholder="مثال: ذَهَبَ أحمدُ إلى المدرسةِ"
+                        value={q.answer}
+                        onChangeText={(v) => setQ(i, { answer: v })}
+                      />
+                      <Text style={styles.correctHint}>تصحيح يدوي من شاشة النتائج — وإن كتب الطالب نفس النص حرفياً تُحسب الدرجة آلياً</Text>
+                    </>
+                  ) : null}
+
+                  {q.type === 'essay' ? (
+                    <Text style={styles.correctHint}>سؤال مقالي — يجيب الطالب كتابةً وتصححه أنت يدوياً من النتائج</Text>
+                  ) : null}
+
+                  {q.type === 'short' ? (
+                    <Text style={styles.correctHint}>إجابة قصيرة بسطر واحد — تصحيح يدوي من شاشة النتائج</Text>
+                  ) : null}
+
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm }}>
                     <Text style={styles.marksLabel}>درجة السؤال:</Text>
                     <View style={{ flex: 1 }}>
@@ -439,16 +616,15 @@ export default function ExamsScreen() {
                   </View>
                 </Card>
               ))}
-              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                <View style={{ flex: 1 }}>
-                  <AppButton title="+ اختياري" small variant="outline" onPress={() => setQuestions((p) => [...p, blankQ('mcq')])} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <AppButton title="+ صح/خطأ" small variant="outline" onPress={() => setQuestions((p) => [...p, blankQ('tf')])} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <AppButton title="+ مقالي" small variant="outline" onPress={() => setQuestions((p) => [...p, blankQ('essay')])} />
-                </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+                {([
+                  ['mcq', '+ اختياري'], ['tf', '+ صح/خطأ'], ['complete', '+ أكمل'],
+                  ['match', '+ وصل'], ['essay', '+ مقالي'],
+                ] as [ExamQuestionType, string][]).map(([t, label]) => (
+                  <View key={t} style={{ flex: 1, minWidth: '30%' }}>
+                    <AppButton title={label} small variant="outline" onPress={() => setQuestions((p) => [...p, blankQ(t)])} />
+                  </View>
+                ))}
               </View>
               <View style={{ height: spacing.md }} />
               <AppButton title="معاينة الورقة قبل الحفظ" icon="eye" variant="ghost" small onPress={() => setPreviewOpen(true)} />
@@ -469,20 +645,32 @@ export default function ExamsScreen() {
           <View style={styles.modalSheet}>
             <Text style={styles.modalTitle}>معاينة الورقة — {title || '(بلا عنوان)'}</Text>
             <Text style={styles.previewSub}>
-              {subject} · {previewQuestions.length} أسئلة · {duration || 30} دقيقة · المجموع {examMarksTotal(questions)} درجة
+              {subject} · {questions.length} أسئلة · {duration || 30} دقيقة · المجموع {examMarksTotal(questions)} درجة
               {published ? ' · سيُنشر' : ' · مسودة'}
             </Text>
             <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
-              {previewQuestions.map((q, i) => (
+              {questions.map((q, i) => (
                 <View key={i} style={styles.previewQ}>
                   <Text style={styles.previewQText}>
-                    {i + 1}) {q.q} [{q.type === 'mcq' ? 'اختياري' : q.type === 'tf' ? 'صح/خطأ' : 'مقالي'} — {Number(q.marks) || 1} درجة]
+                    {i + 1}) {q.q || '(بلا نص بعد)'} [{EXAM_TYPE_LABEL[q.type]} — {Number(q.marks) || 1} درجة]
                   </Text>
-                  {(q.choices ?? []).map((c, ci) => (
+                  {(q.type === 'mcq' || q.type === 'multi') && q.choices.map((c, ci) => (
                     <Text key={ci} style={styles.previewChoice}>
                       {ci + 1}) {c || '...'}
                     </Text>
                   ))}
+                  {q.type === 'complete' ? (
+                    <Text style={styles.previewChoice}>أكمل: .............................. (النموذج: {q.answer || '...'})</Text>
+                  ) : null}
+                  {q.type === 'match' ? q.pairs.map((p, pi) => (
+                    <Text key={pi} style={styles.previewChoice}>{p.l || '...'} ⇠ {p.r || '...'}</Text>
+                  )) : null}
+                  {q.type === 'correct' ? (
+                    <Text style={styles.previewChoice}>صحّح: .................... (النموذج: {q.answer || '—'})</Text>
+                  ) : null}
+                  {q.type === 'essay' || q.type === 'short' ? (
+                    <Text style={styles.previewChoice}>إجابة كتابية: .......................</Text>
+                  ) : null}
                 </View>
               ))}
             </ScrollView>
@@ -492,7 +680,7 @@ export default function ExamsScreen() {
         </View>
       </Modal>
 
-      {/* المحاولات والنتائج + تصحيح المقالي */}
+      {/* المحاولات والنتائج + تصحيح اليدوي */}
       <Modal visible={attemptsOpen} transparent animationType="slide" onRequestClose={() => setAttemptsOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
@@ -502,9 +690,9 @@ export default function ExamsScreen() {
                 <Text style={styles.dimText}>لم يؤدِ أي طالب هذا الامتحان بعد</Text>
               ) : attempts.map((a) => {
                 const needsReview = a.status === 'pending_review';
-                const essayAnswers = (attemptsExam?.questions ?? [])
-                  .map((q, qi) => ({ q, ans: a.answers[qi] }))
-                  .filter((x) => (x.q.type ?? 'mcq') === 'essay');
+                const manualAnswers = (attemptsExam?.questions ?? [])
+                  .map((q, qi) => ({ q, ans: a.answers[qi], model: attemptsExam?.answers?.[qi] }))
+                  .filter((x) => isManualExamType(x.q.type));
                 return (
                   <View key={a.id} style={styles.attemptRow}>
                     <View style={{ flex: 1 }}>
@@ -512,9 +700,10 @@ export default function ExamsScreen() {
                       <Text style={styles.attemptDate}>
                         {formatDate(a.created_at)}{needsReview ? ' · قيد مراجعتك' : ''}
                       </Text>
-                      {needsReview && essayAnswers.map((x, xi) => (
-                        <Text key={xi} style={styles.essayAns} numberOfLines={3}>
-                          مقالي: {String(x.ans ?? '—')}
+                      {needsReview && manualAnswers.map((x, xi) => (
+                        <Text key={xi} style={styles.essayAns} numberOfLines={4}>
+                          {EXAM_TYPE_LABEL[x.q.type ?? 'mcq']}: {String(x.ans ?? '—') || '(تركها فارغة)'}
+                          {typeof x.model === 'string' && x.model.trim() ? `\nالنموذج: ${x.model}` : ''}
                         </Text>
                       ))}
                       {needsReview ? (
@@ -579,7 +768,7 @@ function MiniBtn({ icon, label, color, onPress }: {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   addBtn: {
     width: 40, height: 40, borderRadius: radius.full,
     backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
@@ -617,13 +806,13 @@ const styles = StyleSheet.create({
   qHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
   qNum: { color: colors.primary, fontSize: font.md, fontWeight: '800' },
   starter: {
-    flex: 1, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
-    borderRadius: radius.md, paddingVertical: spacing.sm, alignItems: 'center',
+    backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.md, paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
   },
   starterText: { color: colors.text, fontSize: font.xs, fontWeight: '800', textAlign: 'center' },
-  typeRow: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.md },
+  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.md },
   typeChip: {
-    flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    width: '48.5%', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
     borderRadius: radius.full, paddingVertical: spacing.sm, alignItems: 'center',
   },
   typeChipActive: { backgroundColor: colors.primary + '33', borderColor: colors.primary },
@@ -637,6 +826,7 @@ const styles = StyleSheet.create({
   essayAns: { color: colors.info, fontSize: font.sm, textAlign: 'right', marginTop: 4, lineHeight: 20 },
   manualRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   choiceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  pairRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm },
   correctHint: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: spacing.xs },
   dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
   attemptRow: {
@@ -646,4 +836,4 @@ const styles = StyleSheet.create({
   attemptName: { color: colors.text, fontSize: font.md, fontWeight: '700', textAlign: 'right' },
   attemptDate: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
   attemptScore: { fontSize: font.md, fontWeight: '900' },
-});
+}));

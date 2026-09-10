@@ -10,7 +10,7 @@ import { isValidSupabaseUrl, saveOverrideConfig } from '../lib/config';
 import { applyConfig } from '../lib/supabase';
 import { useSession } from '../lib/session';
 import { arabicError } from '../lib/utils';
-import { colors, font, radius, spacing } from '../theme';
+import { colors, font, radius, spacing, themedStyles } from '../theme';
 import { AppButton, AppInput, Card } from './controls';
 import { FormMessage } from './pickers';
 
@@ -98,7 +98,7 @@ export function ConnectionSetup() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   wrap: { alignItems: 'center', paddingTop: spacing.xxl * 1.5 },
   iconWrap: {
     width: 72, height: 72, borderRadius: radius.full,
@@ -114,4 +114,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted, fontSize: font.sm, textAlign: 'center',
     marginTop: spacing.xl, lineHeight: 22,
   },
-});
+}));

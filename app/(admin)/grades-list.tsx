@@ -14,7 +14,7 @@ import { useSession } from '../../src/lib/session';
 import { isOwner } from '../../src/lib/staff';
 import type { Grade } from '../../src/lib/types';
 import { arabicError } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function GradesListScreen() {
   const { profile } = useSession();
@@ -169,7 +169,7 @@ export default function GradesListScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   addRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     paddingHorizontal: spacing.lg, marginBottom: spacing.md,
@@ -192,4 +192,4 @@ const styles = StyleSheet.create({
     color: colors.text, fontSize: font.lg, fontWeight: '900',
     textAlign: 'center', marginBottom: spacing.lg,
   },
-});
+}));
