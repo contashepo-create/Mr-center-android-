@@ -224,10 +224,18 @@ export async function devFetchPendingRequests(): Promise<(SubscriptionRequest & 
   return rows.map((r) => ({ ...r, center_name: byId.get(r.center_id)?.name, center_code: byId.get(r.center_id)?.code }));
 }
 
-export async function devResolveRequest(id: string, centerId: string, approve: boolean): Promise<void> {
+export async function devResolveRequest(id: string, approve: boolean): Promise<void> {
   const { error } = await getSupabase().from('subscription_requests')
     .update({ status: approve ? 'approved' : 'rejected' }).eq('id', id);
   if (error) throw error;
+}
+
+/** سجل معاملات السنتر مع المطور: كل الاشتراكات المفعّلة عبر الزمن */
+export async function fetchSubscriptionsHistory(centerId: string): Promise<Subscription[]> {
+  const { data, error } = await getSupabase().from('center_subscriptions').select('*')
+    .eq('center_id', centerId).order('created_at', { ascending: false }).limit(50);
+  if (error) throw error;
+  return (data ?? []) as Subscription[];
 }
 
 /** سجل عمليات سنتر (للمالك) */

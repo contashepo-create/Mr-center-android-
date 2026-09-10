@@ -1,18 +1,19 @@
 // ============================================================
-// تبويبات الطالب مع حارس الصلاحية
+// منطقة الطالب: Stack أب يشغّل شريط التبويبات والشاشات الداخلية
+// (الاختبارات/الإشعارات/الجدول...) — رجوع حقيقي للسابق بتلاشٍ داكن.
 // ============================================================
 
-import { Ionicons } from '@expo/vector-icons';
-import { Tabs } from 'expo-router';
+import { Stack } from 'expo-router';
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { LoadingView } from '../../src/components/controls';
 import { useSession } from '../../src/lib/session';
-import { colors } from '../../src/theme';
+import { colors, themedStyles } from '../../src/theme';
 
-export default function StudentTabsLayout() {
+export default function StudentLayout() {
   const { profile, ready } = useSession();
 
+  // حماية أولية: الحارس في الجذر يوجّه الأدوار الأخرى فوراً
   if (!ready || !profile) {
     return <LoadingView message="جاري تحميل حسابك..." />;
   }
@@ -21,71 +22,21 @@ export default function StudentTabsLayout() {
   }
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: styles.tabBar,
-        tabBarActiveTintColor: colors.cyan,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: styles.tabLabel,
-      }}
-    >
-      <Tabs.Screen
-        name="home"
-        options={{
-          title: 'الرئيسية',
-          tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
+    <View style={styles.root}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          animation: 'fade',
+          animationDuration: 180,
+          contentStyle: { backgroundColor: colors.bg },
         }}
-      />
-      <Tabs.Screen
-        name="my-attendance"
-        options={{
-          title: 'الحضور',
-          tabBarIcon: ({ color, size }) => <Ionicons name="checkmark-done" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="my-grades"
-        options={{
-          title: 'درجاتي',
-          tabBarIcon: ({ color, size }) => <Ionicons name="star" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="my-payments"
-        options={{
-          title: 'المدفوعات',
-          tabBarIcon: ({ color, size }) => <Ionicons name="wallet" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'حسابي',
-          tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
-        }}
-      />
-      {/* شاشات داخلية مخفية من شريط التبويبات */}
-      <Tabs.Screen name="my-exams" options={{ href: null }} />
-      <Tabs.Screen name="my-inquiries" options={{ href: null }} />
-      <Tabs.Screen name="my-surveys" options={{ href: null }} />
-      <Tabs.Screen name="my-library" options={{ href: null }} />
-      <Tabs.Screen name="my-schedule" options={{ href: null }} />
-      <Tabs.Screen name="my-notifications" options={{ href: null }} />
-    </Tabs>
+      >
+        <Stack.Screen name="(tabs)" />
+      </Stack>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  tabBar: {
-    backgroundColor: colors.bgSoft,
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    height: 62,
-    paddingBottom: 8,
-    paddingTop: 6,
-    // العربية: الرئيسية يميناً دائماً مهما كانت لغة الجهاز
-    direction: 'rtl',
-  },
-  tabLabel: { fontSize: 11, fontWeight: '700' },
-});
+const styles = themedStyles(() => StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
+}));

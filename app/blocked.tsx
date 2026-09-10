@@ -12,7 +12,7 @@ import { fetchPublicConfig } from '../src/lib/supabase';
 import type { PublicConfig } from '../src/lib/types';
 import { planLabel } from '../src/lib/billing';
 import { formatDate } from '../src/lib/utils';
-import { colors, font, radius, spacing } from '../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../src/theme';
 
 export default function BlockedScreen() {
   const { subscription, refresh, signOut } = useSession();
@@ -84,7 +84,7 @@ export default function BlockedScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   wrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   iconWrap: {
     width: 92, height: 92, borderRadius: radius.full,
@@ -102,4 +102,4 @@ const styles = StyleSheet.create({
   },
   rowLabel: { color: colors.textSecondary, fontSize: font.md },
   rowValue: { color: colors.text, fontSize: font.md, fontWeight: '800' },
-});
+}));

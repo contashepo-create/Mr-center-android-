@@ -13,7 +13,7 @@ import { fetchMyExamAttempts, fetchPublishedExams, submitExam } from '../../src/
 import { useSession } from '../../src/lib/session';
 import type { ExamAttempt, PublishedExam } from '../../src/lib/types';
 import { arabicError, formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function StudentExamsScreen() {
   const { profile } = useSession();
@@ -236,7 +236,7 @@ export default function StudentExamsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
   examCard: { marginBottom: spacing.md },
   examHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
@@ -270,4 +270,4 @@ const styles = StyleSheet.create({
   resTitle: { color: colors.text, fontSize: font.md, fontWeight: '700', textAlign: 'right' },
   resMeta: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
   resScore: { fontSize: font.lg, fontWeight: '900' },
-});
+}));

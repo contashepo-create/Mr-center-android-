@@ -12,7 +12,7 @@ import { fetchMyNotifications, markNotificationRead } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import type { MyNotification } from '../../src/lib/types';
 import { formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function MyNotificationsScreen() {
   const { profile } = useSession();
@@ -95,7 +95,7 @@ function NotifCard({ n, open, onOpen }: { n: MyNotification; open: boolean; onOp
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   card: { marginBottom: spacing.md },
   unreadCard: { borderColor: colors.primary + '66', backgroundColor: colors.primary + '11' },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
@@ -104,4 +104,4 @@ const styles = StyleSheet.create({
   date: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
   preview: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: spacing.sm, lineHeight: 20 },
   body: { color: colors.text, fontSize: font.md, textAlign: 'right', marginTop: spacing.sm, lineHeight: 26 },
-});
+}));

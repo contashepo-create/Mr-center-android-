@@ -22,7 +22,7 @@ import { applyConfig, getActiveConfig, getLastRemoteConfig } from '../../src/lib
 import { getCurrentVersionLabel, isSelfUpdateSupported } from '../../src/lib/updater';
 import { useSession } from '../../src/lib/session';
 import { arabicError } from '../../src/lib/utils';
-import { colors, font, spacing } from '../../src/theme';
+import { colors, font, spacing, themedStyles } from '../../src/theme';
 
 export default function ConnectionManager() {
   const { profile, ready, reinitConnection, signOut, refresh } = useSession();
@@ -201,7 +201,7 @@ export default function ConnectionManager() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   statusTitle: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
   statusSub: { color: colors.textSecondary, fontSize: font.sm, marginTop: 2, textAlign: 'right', lineHeight: 19 },
@@ -210,4 +210,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted, fontSize: font.sm, lineHeight: 24,
     marginTop: spacing.xl, textAlign: 'right',
   },
-});
+}));

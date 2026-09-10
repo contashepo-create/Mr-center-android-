@@ -5,14 +5,15 @@
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
-import { Card, ListItem, SectionTitle } from '../../src/components/controls';
-import { GradientScreen, KeyboardScreen, ScreenHeader } from '../../src/components/layout';
-import { fetchGroups, fetchMyCenter, fetchStudentById } from '../../src/lib/api';
+import { Card, ListItem, SectionTitle } from '../../../src/components/controls';
+import { ThemeToggleRow } from '../../../src/components/ThemeToggle';
+import { GradientScreen, KeyboardScreen, ScreenHeader } from '../../../src/components/layout';
+import { fetchGroups, fetchMyCenter, fetchStudentById } from '../../../src/lib/api';
 import { useFocusEffect } from 'expo-router';
-import { useSession } from '../../src/lib/session';
-import type { Center, Group, Student } from '../../src/lib/types';
-import { formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { useSession } from '../../../src/lib/session';
+import type { Center, Group, Student } from '../../../src/lib/types';
+import { formatDate } from '../../../src/lib/utils';
+import { colors, font, radius, spacing, themedStyles } from '../../../src/theme';
 
 export default function StudentProfileScreen() {
   const { profile, signOut } = useSession();
@@ -72,6 +73,7 @@ export default function StudentProfileScreen() {
         </Card>
 
         <SectionTitle title="عام" />
+        <ThemeToggleRow />
         <ListItem
           title="حول التطبيق"
           icon="information-circle"
@@ -100,7 +102,7 @@ function Row({ label, value, highlight }: { label: string; value: string; highli
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   avatar: {
     width: 84, height: 84, borderRadius: radius.full,
     backgroundColor: colors.primary + '33', borderWidth: 2, borderColor: colors.primary,
@@ -120,4 +122,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted, fontSize: font.xs, marginTop: spacing.md,
     textAlign: 'right', lineHeight: 18,
   },
-});
+}));

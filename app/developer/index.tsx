@@ -13,7 +13,7 @@ import { GradientScreen, KeyboardScreen, ScreenHeader } from '../../src/componen
 import { devFetchCenters, devFetchProfilesCount } from '../../src/lib/api';
 import { getActiveConfig } from '../../src/lib/supabase';
 import { useSession } from '../../src/lib/session';
-import { colors, font, gradients, radius, spacing } from '../../src/theme';
+import { colors, font, gradients, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function DeveloperHome() {
   const { profile, ready, signOut } = useSession();
@@ -130,11 +130,11 @@ export default function DeveloperHome() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   hero: {
     borderRadius: radius.lg, padding: spacing.xl, marginTop: spacing.sm,
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
   },
   heroTitle: { color: '#052E22', fontSize: font.lg, fontWeight: '900', textAlign: 'right' },
   heroSub: { color: 'rgba(4,46,34,0.8)', fontSize: font.xs, marginTop: 2, textAlign: 'right' },
-});
+}));

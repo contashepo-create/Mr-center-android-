@@ -10,7 +10,7 @@ import { Card, EmptyState, LoadingView, SectionTitle } from '../../src/component
 import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { fetchHonorees, fetchImportantLinks, fetchSharedFiles, type Honoree, type ImportantLink, type SharedFile } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function StudentLibraryScreen() {
   const { profile } = useSession();
@@ -103,7 +103,7 @@ export default function StudentLibraryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
   honorCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.sm },
   rankCircle: {
@@ -121,4 +121,4 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   linkName: { flex: 1, color: colors.text, fontSize: font.md, fontWeight: '700', textAlign: 'right' },
-});
+}));

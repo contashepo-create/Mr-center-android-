@@ -10,17 +10,17 @@ import {
 } from 'react-native';
 import {
   AppButton, AppInput, Card, EmptyState, LoadingView, SheetHandle,
-} from '../../src/components/controls';
-import { GradientScreen, ScreenHeader } from '../../src/components/layout';
-import { FormMessage, OptionPicker } from '../../src/components/pickers';
+} from '../../../src/components/controls';
+import { GradientScreen, ScreenHeader } from '../../../src/components/layout';
+import { FormMessage, OptionPicker } from '../../../src/components/pickers';
 import {
   deleteStudent, fetchGrades, fetchGroups, fetchStudents, upsertStudent,
-} from '../../src/lib/api';
-import { useSession } from '../../src/lib/session';
-import type { Grade, Group, Student } from '../../src/lib/types';
-import { isOwner } from '../../src/lib/staff';
-import { arabicError, isValidPhone, normalizePhone } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+} from '../../../src/lib/api';
+import { useSession } from '../../../src/lib/session';
+import type { Grade, Group, Student } from '../../../src/lib/types';
+import { isOwner, useTeacherGroupIds } from '../../../src/lib/staff';
+import { arabicError, isValidPhone, normalizePhone } from '../../../src/lib/utils';
+import { colors, font, radius, spacing, themedStyles } from '../../../src/theme';
 
 export default function StudentsScreen() {
   const { profile } = useSession();
@@ -99,7 +99,11 @@ export default function StudentsScreen() {
   // المدرس: عرض وفتح ملفات فقط — الإضافة والتعديل والحذف للمالك
   const canManage = isOwner(profile);
 
+  // المدرس: يرى طلاب مجموعاته المسندة فقط (السكرتير/المدير/المالك: الكل)
+  const teacherScope = useTeacherGroupIds();
+
   const displayed = students.filter((s) => {
+    if (teacherScope && (!s.group_id || !teacherScope.includes(s.group_id))) return false;
     if (filterStatus !== 'all' && s.status !== filterStatus) return false;
     if (filterGroup !== 'all' && s.group_id !== filterGroup) return false;
     return true;
@@ -214,11 +218,11 @@ export default function StudentsScreen() {
       <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.md }}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
           <FilterChip
-            label={`الكل (${students.length})`}
+            label={`الكل (${teacherScope ? students.filter((s) => s.group_id && teacherScope.includes(s.group_id)).length : students.length})`}
             active={filterGroup === 'all'}
             onPress={() => setFilterGroup('all')}
           />
-          {groups.map((g) => (
+          {(teacherScope ? groups.filter((g) => teacherScope.includes(g.id)) : groups).map((g) => (
             <FilterChip
               key={g.id}
               label={`${g.name} (${students.filter((s) => s.group_id === g.id).length})`}
@@ -374,7 +378,7 @@ function StudentCard({ student, groupLabel, gradeLabel, canManage, onOpen, onEdi
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   addBtn: {
     width: 40, height: 40, borderRadius: radius.full,
     backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
@@ -435,4 +439,4 @@ const styles = StyleSheet.create({
     color: colors.text, fontSize: font.lg, fontWeight: '900',
     textAlign: 'center', marginBottom: spacing.lg,
   },
-});
+}));

@@ -9,7 +9,7 @@ import {
   ActivityIndicator, Animated, Pressable, StyleSheet, Text, TextInput,
   View, type TextInputProps, type ViewStyle,
 } from 'react-native';
-import { colors, font, gradients, radius, shadow, spacing } from '../theme';
+import { colors, font, gradients, radius, shadow, spacing, themedStyles } from '../theme';
 
 // ------------------------------------------------------------
 // الأزرار
@@ -277,7 +277,7 @@ export function LoadingView({ message }: { message?: string }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   sheetHandle: {
     width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong,
     alignSelf: 'center', marginBottom: spacing.md,
@@ -352,4 +352,4 @@ const styles = StyleSheet.create({
 
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl * 2 },
   loadingText: { color: colors.textSecondary, marginTop: spacing.md, fontSize: font.sm },
-});
+}));

@@ -17,7 +17,7 @@ import { useSession } from '../../src/lib/session';
 import type { Group } from '../../src/lib/types';
 import { arabicError, arabicMonth, formatDate, formatMoney } from '../../src/lib/utils';
 import { buildReportHtml, shareReportPdf } from '../../src/lib/report';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: arabicMonth(i + 1) }));
 const now = new Date();
@@ -203,7 +203,7 @@ export default function ReportsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
   attCard: { marginBottom: spacing.sm },
   attHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
@@ -223,4 +223,4 @@ const styles = StyleSheet.create({
   },
   gradeName: { flex: 1, color: colors.text, fontSize: font.md, fontWeight: '700', textAlign: 'right' },
   gradeAvg: { color: colors.success, fontSize: font.md, fontWeight: '900' },
-});
+}));

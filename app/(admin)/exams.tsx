@@ -19,7 +19,7 @@ import { useSession } from '../../src/lib/session';
 import type { AppExam, ExamAttempt, ExamQuestionType, Grade, Student } from '../../src/lib/types';
 import { arabicError, examMarksTotal, formatDate, validateExamDraft } from '../../src/lib/utils';
 import { buildReportHtml, shareReportPdf } from '../../src/lib/report';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 interface DraftQ { q: string; type: ExamQuestionType; choices: string[]; correct: number; marks: number }
 
@@ -579,7 +579,7 @@ function MiniBtn({ icon, label, color, onPress }: {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   addBtn: {
     width: 40, height: 40, borderRadius: radius.full,
     backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
@@ -646,4 +646,4 @@ const styles = StyleSheet.create({
   attemptName: { color: colors.text, fontSize: font.md, fontWeight: '700', textAlign: 'right' },
   attemptDate: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
   attemptScore: { fontSize: font.md, fontWeight: '900' },
-});
+}));

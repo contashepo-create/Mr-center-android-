@@ -13,7 +13,7 @@ import { useSession } from '../../src/lib/session';
 import { isOwner } from '../../src/lib/staff';
 import type { ActivityLog } from '../../src/lib/types';
 import { formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 const ACTION_LABEL: Record<string, string> = {
   payment_recorded: 'تحصيل دفعة',
@@ -94,10 +94,10 @@ export default function ActivityScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   row: { marginBottom: spacing.sm },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   action: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
   meta: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
   details: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: spacing.sm, lineHeight: 20 },
-});
+}));

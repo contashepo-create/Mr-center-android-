@@ -20,7 +20,7 @@ import { can, isOwner } from '../../../src/lib/staff';
 import { buildReportHtml, shareReportPdf } from '../../../src/lib/report';
 import type { Attendance, Due, ExamAttempt, Grade, Group, ManualGrade, Payment, Student } from '../../../src/lib/types';
 import { arabicError, arabicMonth, formatDate, formatDays, formatMoney, formatTimeAr } from '../../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../../src/theme';
 
 export default function StudentFileScreen() {
   const { id, pay } = useLocalSearchParams<{ id: string; pay?: string }>();
@@ -445,7 +445,8 @@ export default function StudentFileScreen() {
           </View>
         ) : null}
 
-        {/* المستحقات المعلقة */}
+        {/* المستحقات المعلقة — تظهر لمن يملك التحصيل أو التقارير فقط */}
+        {(can(profile, 'collect') || can(profile, 'reports')) ? (<>
         <SectionTitle title="المستحقات المعلقة" />
         {pendingDues.length === 0 ? (
           <Card><Text style={styles.okText}>✅ لا توجد مستحقات معلقة</Text></Card>
@@ -461,6 +462,7 @@ export default function StudentFileScreen() {
             ) : undefined}
           />
         ))}
+        </>) : null}
 
         {/* الدرجات */}
         <SectionTitle title={`الدرجات (${grades.length})`} />
@@ -518,7 +520,8 @@ export default function StudentFileScreen() {
           </View>
         ))}
 
-        {/* سجل الدفعات */}
+        {/* سجل الدفعات — لنفس الصلاحيتين */}
+        {(can(profile, 'collect') || can(profile, 'reports')) ? (<>
         <SectionTitle title={`سجل الدفعات (${payments.length})`} />
         {payments.length === 0 ? (
           <Card><Text style={styles.dimText}>لا توجد دفعات مسجلة</Text></Card>
@@ -531,6 +534,7 @@ export default function StudentFileScreen() {
             iconColor={colors.success}
           />
         ))}
+        </>) : null}
       </ScrollView>
 
       {/* نموذج الدفعة */}
@@ -597,7 +601,7 @@ export default function StudentFileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.lg },
   avatar: {
     width: 60, height: 60, borderRadius: radius.full,
@@ -630,4 +634,4 @@ const styles = StyleSheet.create({
     color: colors.text, fontSize: font.lg, fontWeight: '900',
     textAlign: 'center', marginBottom: spacing.lg,
   },
-});
+}));

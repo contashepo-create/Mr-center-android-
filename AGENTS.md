@@ -234,7 +234,8 @@ src/
 ├─ components/            layout (BackHeader برجوع آمن canGoBack) · controls (AppButton/Content بأنيميشن spring + تباين أحبار + NoAccess + SheetHandle) · pickers (OptionPicker + DaysPicker + TimePicker + FormMessage بزر نسخ) · LoginForm (أدوار ثلاث + معلق + إعادة تأكيد + نسيت محمي) · DeveloperGate (صفحة لا Layout) · ConnectionSetup · UpdateManager (تباين داكن)
 └─ lib/
    ├─ types/api/supabase/session/config/pendingRegistration (سنتر/طالب/فريق)
-   ├─ staff.ts            STAFF_ROLES + isStaff/isOwner + can() + roleLabel + useTeacherGroupIds + TEACHER_TABS/SCREENS
+   ├─ rbac.ts             المنطق النقي القابل للاختبار في Node: STAFF_ROLES + isStaff/isOwner + can() + roleLabel + TEACHER_TABS/SCREENS
+   ├─ staff.ts            غلاف يعيد تصدير rbac + useTeacherGroupIds (Hook نطاق مجموعات المدرس)
    ├─ billing.ts          PRODUCTS (الأسعار والحدود) + planLabel + limitsFor + priceFor + TRIAL_DAYS=7
    ├─ qr.ts               يومي MRC1 + ثابت MRC0 (XOR+FNV + UTF-8 عربي + يومية تمنع السكرين)
    ├─ whatsapp.ts         wa.me + تطبيع مصري + قوالب
@@ -242,7 +243,7 @@ src/
    ├─ backup.ts           نسخة JSON كاملة (23 جدولاً) بالتوازي + مشاركة
    └─ report.ts           HTML عربي → PDF ومشاركة
 
-scripts/  test-utils (utils+billing) · test-qr · test-worker (يشمل /push/notify 403/400) · audit-sql · audit-rpc (تطابق وسائط التطبيق↔القاعدة) · audit-app · test-e2e-live (حي: E2E_* keys + تنظيف + تدوير service_role بعده)
+scripts/  test-fresh (منظومة مستقلة: باقات/مصفوفة صلاحيات/بوابات شاشات/ثيم حي/بث مجمّع/rate limit/تنقل/عزل api/مخطط) · test-utils (utils+billing) · test-qr · test-worker (يشمل /push/notify 403/400) · audit-sql · audit-rpc (تطابق وسائط التطبيق↔القاعدة) · audit-app · test-e2e-live (حي: E2E_* keys + تنظيف + تدوير service_role بعده)
 ```
 
 **اصطلاحات**: `getSupabase()` فقط · لا حالة خارج SessionProvider · الأدوار من `profiles` · أخطاء معربة · RLS أولاً والواجهة تجميل · أي شاشة جديدة تُسجل في (الحارس + التبويبات + audit-app) معاً.
@@ -278,6 +279,7 @@ scripts/  test-utils (utils+billing) · test-qr · test-worker (يشمل /push/n
 13. أي RPC تُغيَّر وسائطه/إرجاعه: `DROP FUNCTION` أولاً + تعريف الدوال قبل سياساتها + فحص `audit-rpc` أخضر.
 14. المنع الافتراضي للفريق: أي شاشة/زر جديد يُفحص بـ `can()` أو `isOwner` + يُسجل في `TEACHER_SCREENS`/التبويبات + فحص `audit-app`.
 15. أرقام الباقات والحدود في `billing.ts` فقط — يغطيها `test-utils` (أي تغيير سعر يكسر الفحص عمداً للمراجعة).
+16. نطاق المدرس: students/groups/schedule (وكل شاشة بيانات) تقصر قوائمها على `useTeacherGroupIds` — المدرس لا يرى إلا مجموعاته المسندة وطلابها. ملف الطالب: المستحقات والدفعات بصلاحية collect/reports فقط. guide/schedule عرضيتان (قراءة فقط) بلا بوابة صلاحية.
 16. لا أسرار في الكود/الشات (`service_role` للعامل Secrets والسكريبتات فقط، ويُبدَّل بعد المشاركة).
 
 ---
@@ -286,6 +288,7 @@ scripts/  test-utils (utils+billing) · test-qr · test-worker (يشمل /push/n
 
 | الجناح | الفحوص | الوصف |
 |---|---|---|
+| `test-fresh.mjs` | 168 | منظومة مستقلة كلياً: باقات حرفية · مصفوفة صلاحيات كل دور · بوابات كل شاشة · نطاق المدرس · ثيم حي بتباين WCAG · تجميع بث المطور · rate limit بكل الصيغ · بنية تنقل · عزل api · مخطط القاعدة |
 | `test-utils.mjs` | 95 | منطق نقي (utils+billing بتجميع tsc): تطبيع/صيغ/وقت/تعارض/بريد/روابط/امتحانات/باقات وأسعار |
 | `test-qr.mjs` | 15 | ترميز/فك الطالب والسنتر (يشمل عربياً) + رفض الدخيل/المعبث + اليومية |
 | `test-worker.mjs` | 22 | مسارات العامل + CORS + توافق الإصدار + `/push/notify` (403/400) |
@@ -358,7 +361,7 @@ scripts/  test-utils (utils+billing) · test-qr · test-worker (يشمل /push/n
 
 ## 16) قائمة فحص قبل التسليم
 
-- [ ] `npm test` — الأجنحة الستة خضراء (وأضِف فحوصاً لما أضفته).
+- [ ] `npm test` — الأجنحة السبعة خضراء (وأضِف فحوصاً لما أضفته).
 - [ ] `npm run typecheck` — صفر أخطاء.
 - [ ] `CI=1 npx expo export --platform android` — الحزمة تُبنى.
 - [ ] القسم 9 بنداً بنداً + العربية RTL + رسائل معربة بزر نسخ.

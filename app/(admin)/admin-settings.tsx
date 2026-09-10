@@ -17,7 +17,7 @@ import { exportCenterBackup } from '../../src/lib/backup';
 import type { Center, CenterSettings, PublicConfig } from '../../src/lib/types';
 import { planLabel } from '../../src/lib/billing';
 import { arabicError, formatDate, isValidEmail, isValidPhone } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function AdminSettingsScreen() {
   const { profile, subscription, signOut, refresh } = useSession();
@@ -250,7 +250,7 @@ function Row({ label, value, highlight }: { label: string; value: string; highli
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   row: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border,
@@ -269,4 +269,4 @@ const styles = StyleSheet.create({
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.md },
   toggleTitle: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
   toggleSub: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: 2 },
-});
+}));

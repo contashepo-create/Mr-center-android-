@@ -15,7 +15,7 @@ import { fetchInquiries, fetchStudents, replyInquiry } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import type { AppInquiry, InquiryStatus, Student } from '../../src/lib/types';
 import { arabicError, formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 const KINDS: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap; color: string }> = {
   question: { label: 'سؤال', icon: 'help-circle', color: colors.info },
@@ -233,7 +233,7 @@ export default function InquiriesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   chipWrap: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
     borderRadius: radius.full, backgroundColor: colors.surface,
@@ -271,4 +271,4 @@ const styles = StyleSheet.create({
     textAlign: 'center', marginBottom: spacing.sm,
   },
   modalBody: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginBottom: spacing.md, lineHeight: 20 },
-});
+}));

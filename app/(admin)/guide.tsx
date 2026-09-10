@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Card, SectionTitle } from '../../src/components/controls';
 import { BackHeader, GradientScreen } from '../../src/components/layout';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 const GUIDES: { icon: keyof typeof Ionicons.glyphMap; title: string; steps: string[] }[] = [
   {
@@ -139,7 +139,7 @@ export default function GuideScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   iconWrap: {
     width: 42, height: 42, borderRadius: radius.md,
@@ -153,4 +153,4 @@ const styles = StyleSheet.create({
     backgroundColor: colors.success + '22', color: colors.success, fontWeight: '800', fontSize: font.sm,
   },
   stepText: { flex: 1, color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', lineHeight: 22 },
-});
+}));

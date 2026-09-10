@@ -276,8 +276,12 @@ export function arabicError(err: unknown): string {
   if (msg.includes('already_registered')) return 'هذا الحساب مسجل من قبل — سجّل دخولك مباشرة';
   if (msg.includes('invalid login')) return 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
   if (msg.includes('email not confirmed')) return 'بريدك غير مؤكد بعد — افتح رابط التأكيد المرسل إلى بريدك ثم سجّل دخولك';
-  if (msg.includes('rate limit') || msg.includes('over_email_send_rate_limit') || msg.includes('too many'))
-    return 'ضغط مؤقت على إرسال البريد — انتظر دقائق ثم أعد المحاولة. (لو تكرر: فعّل SMTP خاص من لوحة Supabase)';
+  if (msg.includes('rate limit') || msg.includes('over_email_send_rate_limit')
+    || msg.includes('over_request_rate_limit') || msg.includes('over_sms_send_rate_limit')
+    || msg.includes('too many') || msg.includes('too many requests')
+    || msg.includes('for security purposes') || msg.includes('once every 60 seconds')
+    || msg.includes('once every second') || msg.includes('429'))
+    return 'ضغط مؤقت على خدمة البريد — انتظر دقيقة إلى دقيقتين ثم أعد المحاولة (رسائل التسجيل محدودة عددياً كل ساعة لمنع الإساءة)';
   if (msg.includes('user already registered') || msg.includes('already been registered'))
     return 'هذا البريد الإلكتروني مستخدم من قبل — سجّل دخولك أو استخدم بريداً آخر';
   if (msg.includes('password') && msg.includes('at least'))

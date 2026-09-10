@@ -18,7 +18,7 @@ import {
   arabicError, isAllowedEmailDomain, isValidEmail, isValidPhone,
   normalizeCenterCode, normalizePhone,
 } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function RegisterTeacherScreen() {
   const [step, setStep] = useState<1 | 2>(1);
@@ -204,7 +204,7 @@ export default function RegisterTeacherScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   stepIcon: {
     width: 64, height: 64, borderRadius: 32, alignSelf: 'center',
     backgroundColor: colors.primary + '22', borderWidth: 1, borderColor: colors.primary + '55',
@@ -222,4 +222,4 @@ const styles = StyleSheet.create({
   centerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   centerName: { color: colors.text, fontSize: font.lg, fontWeight: '800', textAlign: 'right' },
   centerOwner: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: 2 },
-});
+}));

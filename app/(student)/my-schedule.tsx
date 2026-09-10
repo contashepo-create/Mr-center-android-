@@ -11,7 +11,7 @@ import { fetchGroups, fetchStudentById, fetchStudentGroups } from '../../src/lib
 import { useSession } from '../../src/lib/session';
 import type { Group } from '../../src/lib/types';
 import { arabicDay, formatTimeAr, timeToMinutes } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function StudentScheduleScreen() {
   const { profile } = useSession();
@@ -75,7 +75,7 @@ export default function StudentScheduleScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
   dayCard: { marginBottom: spacing.sm },
   dayHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
@@ -85,4 +85,4 @@ const styles = StyleSheet.create({
   },
   dayText: { color: colors.text, fontSize: font.md, fontWeight: '800' },
   timeText: { flex: 1, color: colors.textSecondary, fontSize: font.md, fontWeight: '700', textAlign: 'right' },
-});
+}));

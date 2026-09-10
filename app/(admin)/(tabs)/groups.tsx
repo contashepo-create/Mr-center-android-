@@ -6,15 +6,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { AppButton, AppInput, Card, EmptyState, LoadingView, SheetHandle } from '../../src/components/controls';
-import { GradientScreen, ScreenHeader } from '../../src/components/layout';
-import { DaysPicker, FormMessage, OptionPicker, TimePicker } from '../../src/components/pickers';
-import { deleteGroup, fetchGrades, fetchGroups, upsertGroup } from '../../src/lib/api';
-import { useSession } from '../../src/lib/session';
-import { isOwner } from '../../src/lib/staff';
-import type { BillingType, Grade, Group } from '../../src/lib/types';
-import { arabicError, billingLabel, findGroupConflicts, formatDays, formatMoney, formatTimeAr, minutesToTime24, timeToMinutes } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { AppButton, AppInput, Card, EmptyState, LoadingView, SheetHandle } from '../../../src/components/controls';
+import { GradientScreen, ScreenHeader } from '../../../src/components/layout';
+import { DaysPicker, FormMessage, OptionPicker, TimePicker } from '../../../src/components/pickers';
+import { deleteGroup, fetchGrades, fetchGroups, upsertGroup } from '../../../src/lib/api';
+import { useTeacherGroupIds } from '../../../src/lib/staff';
+import { useSession } from '../../../src/lib/session';
+import { isOwner } from '../../../src/lib/staff';
+import type { BillingType, Grade, Group } from '../../../src/lib/types';
+import { arabicError, billingLabel, findGroupConflicts, formatDays, formatMoney, formatTimeAr, minutesToTime24, timeToMinutes } from '../../../src/lib/utils';
+import { colors, font, radius, spacing, themedStyles } from '../../../src/theme';
 
 export default function GroupsScreen() {
   const { profile } = useSession();
@@ -53,8 +54,12 @@ export default function GroupsScreen() {
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
+  // المدرس: يرى مجموعاته المسندة فقط (السكرتير/المدير/المالك: الكل)
+  const teacherScope = useTeacherGroupIds();
+  const visibleGroups = teacherScope ? groups.filter((g) => teacherScope.includes(g.id)) : groups;
+
   const gradeName = (id: string | null) => grades.find((g) => g.id === id)?.name ?? '';
-  const conflicts = useMemo(() => findGroupConflicts(groups), [groups]);
+  const conflicts = useMemo(() => findGroupConflicts(visibleGroups), [visibleGroups]);
   // المدرس: عرض التفاصيل فقط — الإنشاء والتعديل والحذف للمالك
   const canManage = isOwner(profile);
 
@@ -143,7 +148,7 @@ export default function GroupsScreen() {
     <GradientScreen>
       <ScreenHeader
         title="المجموعات"
-        subtitle={`${groups.length} مجموعة`}
+        subtitle={`${visibleGroups.length} مجموعة`}
         right={
           canManage ? (
               <Pressable style={styles.addBtn} onPress={openAdd}>
@@ -164,7 +169,7 @@ export default function GroupsScreen() {
 
       {loading ? (
         <LoadingView message="جاري تحميل المجموعات..." />
-      ) : groups.length === 0 ? (
+      ) : visibleGroups.length === 0 ? (
         <EmptyState
           icon="albums-outline"
           title="لا توجد مجموعات بعد"
@@ -173,7 +178,7 @@ export default function GroupsScreen() {
         />
       ) : (
         <FlatList
-          data={groups}
+          data={visibleGroups}
           keyExtractor={(g) => g.id}
           contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: 100 }}
           showsVerticalScrollIndicator={false}
@@ -336,7 +341,7 @@ function MetaLine({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: 
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   groupCard: { marginBottom: spacing.md },
   groupHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   groupIcon: {
@@ -378,4 +383,4 @@ const styles = StyleSheet.create({
     color: colors.text, fontSize: font.lg, fontWeight: '900',
     textAlign: 'center', marginBottom: spacing.lg,
   },
-});
+}));

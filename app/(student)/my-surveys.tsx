@@ -12,7 +12,7 @@ import { fetchActiveSurveys, fetchMySurveyResponses, submitSurveyResponse } from
 import { useSession } from '../../src/lib/session';
 import type { AppSurvey } from '../../src/lib/types';
 import { arabicError } from '../../src/lib/utils';
-import { colors, font, spacing } from '../../src/theme';
+import { colors, font, spacing, themedStyles } from '../../src/theme';
 
 export default function StudentSurveysScreen() {
   const { profile } = useSession();
@@ -133,10 +133,10 @@ export default function StudentSurveysScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
   svCard: { marginBottom: spacing.md },
   svTitle: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
   svMeta: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: 4 },
   svDone: { color: colors.success, fontSize: font.sm, fontWeight: '700', textAlign: 'right', marginTop: 4 },
-});
+}));

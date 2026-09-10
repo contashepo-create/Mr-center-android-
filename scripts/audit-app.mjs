@@ -107,7 +107,7 @@ console.log('\n━━ فحص الكود: باركود الحضور ━');
 const qrLib = readFileSync(join(root, 'src/lib/qr.ts'), 'utf8');
 check('مكتبة الباركود مشفرة ببادئة خاصة', qrLib.includes('MRC1.') && qrLib.includes('decodeStudentQr'));
 check('شاشة المسح موجودة وتعزل السناتر', readFileSync(join(root, 'app/(admin)/scan.tsx'), 'utf8').includes('لا يخص سنترك'));
-check('بطاقة باركود الطالب في الرئيسية', readFileSync(join(root, 'app/(student)/home.tsx'), 'utf8').includes('encodeStudentQr'));
+check('بطاقة باركود الطالب في الرئيسية', readFileSync(join(root, 'app/(student)/(tabs)/home.tsx'), 'utf8').includes('encodeStudentQr'));
 check('منتقي الوقت بالأرقام', readFileSync(join(root, 'src/components/pickers.tsx'), 'utf8').includes('TimePicker'));
 check('تعديل الصف متاح', readFileSync(join(root, 'src/lib/api.ts'), 'utf8').includes('updateGrade'));
 
@@ -142,7 +142,7 @@ check('التقرير الشامل بأقسام الموقع', readFileSync(join
 check('باركود السنتر (ترميز/فك/عرض/مسح)', (() => {
   const qr = readFileSync(join(root, 'src/lib/qr.ts'), 'utf8');
   return qr.includes('encodeCenterQr') && qr.includes('decodeCenterQr')
-    && readFileSync(join(root, 'app/(admin)/more.tsx'), 'utf8').includes('encodeCenterQr')
+    && readFileSync(join(root, 'app/(admin)/(tabs)/more.tsx'), 'utf8').includes('encodeCenterQr')
     && readFileSync(join(root, 'app/auth/register-student.tsx'), 'utf8').includes('decodeCenterQr');
 })());
 check('تسجيل الطالب بصف ومجموعة من قوائم آمنة', (() => {
@@ -166,7 +166,7 @@ check('العامل يدعم التذكير المجدول والفوري', (() 
   const code = readFileSync(join(root, 'cloudflare/worker.js'), 'utf8');
   return code.includes('scheduled') && code.includes('/push/notify') && code.includes('lessonReminders');
 })());
-check('حقل المدرس في نموذج المجموعة', readFileSync(join(root, 'app/(admin)/groups.tsx'), 'utf8').includes('teacher_name'));
+check('حقل المدرس في نموذج المجموعة', readFileSync(join(root, 'app/(admin)/(tabs)/groups.tsx'), 'utf8').includes('teacher_name'));
 check('شاشة دخول مستقلة للمدرس', (() => {
   const code = readFileSync(join(root, 'app/auth/login-teacher.tsx'), 'utf8');
   return code.includes("expectedRole=\"teacher\"") && layout.includes('isStaff(profile)');
@@ -181,17 +181,27 @@ check('شاشة المدرسين (تفعيل/صلاحيات/إسناد)', (() =>
   return code.includes('setTeacherPerms') && code.includes('assignTeacherGroups') && code.includes('setTeacherActive');
 })());
 check('بوابات صلاحيات المدرس على الشاشات', (() => {
+  // attendance داخل (tabs) والباقي شاشات داخلية على مستوى (admin)
+  const readAdminScreen = (n) => {
+    for (const p of [`app/(admin)/(tabs)/${n}.tsx`, `app/(admin)/${n}.tsx`]) {
+      try { return readFileSync(join(root, p), 'utf8'); } catch { /* التالي */ }
+    }
+    throw new Error(`screen not found: ${n}`);
+  };
   const files = ['attendance', 'scan', 'exams', 'inquiries', 'surveys', 'library', 'reports', 'payments', 'announcements', 'notifications']
-    .map((n) => readFileSync(join(root, `app/(admin)/${n}.tsx`), 'utf8'));
+    .map(readAdminScreen);
   return files.every((c) => c.includes('NoAccess') && c.includes("can(profile,"));
 })());
 check('خريطة شاشات المدرس مطابقة للبوابات الفعلية', (() => {
-  const staff = readFileSync(join(root, 'src/lib/staff.ts'), 'utf8');
+  const staff = readFileSync(join(root, 'src/lib/rbac.ts'), 'utf8');
   const mapRe = /\{\s*route:\s*'([^']+)'\s*,\s*perm:\s*'([a-z_]+)'/g;
   let m; let okAll = true;
   while ((m = mapRe.exec(staff)) !== null) {
     const [, route, perm] = m;
-    const code = readFileSync(join(root, `app/(admin)/${route}.tsx`), 'utf8');
+    let code = '';
+    for (const p of [`app/(admin)/(tabs)/${route}.tsx`, `app/(admin)/${route}.tsx`]) {
+      try { code = readFileSync(join(root, p), 'utf8'); break; } catch { /* التالي */ }
+    }
     if (!code.includes(`can(profile, '${perm}')`)) okAll = false;
   }
   return okAll;
@@ -202,19 +212,19 @@ check('الطالب متعدد المجموعات (ربط + عرض)', (() => {
     && readFileSync(join(root, 'app/(student)/my-schedule.tsx'), 'utf8').includes('fetchStudentGroups');
 })());
 check('المدرس عرض فقط للقوائم (منع افتراضي)', (() => {
-  const st = readFileSync(join(root, 'app/(admin)/students.tsx'), 'utf8');
-  const gr = readFileSync(join(root, 'app/(admin)/groups.tsx'), 'utf8');
+  const st = readFileSync(join(root, 'app/(admin)/(tabs)/students.tsx'), 'utf8');
+  const gr = readFileSync(join(root, 'app/(admin)/(tabs)/groups.tsx'), 'utf8');
   const gl = readFileSync(join(root, 'app/(admin)/grades-list.tsx'), 'utf8');
   return st.includes('canManage') && gr.includes('canManage') && gl.includes('canManage');
 })());
 check('اللوحة تخفي الاشتراك والإجراءات عن المدرس', (() => {
-  const code = readFileSync(join(root, 'app/(admin)/dashboard.tsx'), 'utf8');
+  const code = readFileSync(join(root, 'app/(admin)/(tabs)/dashboard.tsx'), 'utf8');
   return code.includes('!isTeacher && subscription') && code.includes("label=\"طالب جديد\"");
 })());
 check('ملف الطالب: القوائم للمالك فقط', readFileSync(join(root, 'app/(admin)/student/[id].tsx'), 'utf8').includes('isOwner(profile)'));
 check('إشعارات المطور محجوبة عن المدرس', readFileSync(join(root, 'app/(admin)/dev-notices.tsx'), 'utf8').includes('NoAccess'));
 check('أدوار الفريق معممة (مدير/سكرتير)', (() => {
-  const staff = readFileSync(join(root, 'src/lib/staff.ts'), 'utf8');
+  const staff = readFileSync(join(root, 'src/lib/rbac.ts'), 'utf8');
   return staff.includes('STAFF_ROLES') && staff.includes('manager') && staff.includes('isOwner')
     && readFileSync(join(root, 'app/auth/register-teacher.tsx'), 'utf8').includes('registerStaffAccount');
 })());
@@ -233,7 +243,7 @@ check('تفاصيل السنتر للمطور', readFileSync(join(root, 'app/dev
 check('حول التطبيق بمميزات كاملة', readFileSync(join(root, 'app/about.tsx'), 'utf8').includes('APP_FEATURES'));
 check('منع تطابق رقمي الطالب والولي', (() => {
   const a = readFileSync(join(root, 'app/auth/register-student.tsx'), 'utf8');
-  const b = readFileSync(join(root, 'app/(admin)/students.tsx'), 'utf8');
+  const b = readFileSync(join(root, 'app/(admin)/(tabs)/students.tsx'), 'utf8');
   return a.includes('يجب أن يختلف عن رقم هاتفك') && b.includes('يجب أن يختلف عن رقم الطالب');
 })());
 check('بث الإشعارات (إرسال + شاشة طالب + شارة)', (() => {
@@ -241,11 +251,11 @@ check('بث الإشعارات (إرسال + شاشة طالب + شارة)', (()
   const mine = readFileSync(join(root, 'app/(student)/my-notifications.tsx'), 'utf8');
   return admin.includes('sendNotification') && admin.includes('reads')
     && mine.includes('markNotificationRead')
-    && readFileSync(join(root, 'app/(student)/home.tsx'), 'utf8').includes('unreadCount');
+    && readFileSync(join(root, 'app/(student)/(tabs)/home.tsx'), 'utf8').includes('unreadCount');
 })());
 check('مكتبة النسخ الاحتياطي موجودة', readFileSync(join(root, 'src/lib/backup.ts'), 'utf8').includes('exportCenterBackup'));
 check('مكتبة التقارير PDF موجودة', readFileSync(join(root, 'src/lib/report.ts'), 'utf8').includes('shareReportPdf'));
-check('الحضور لا ينشئ حصة قبل الحفظ', readFileSync(join(root, 'app/(admin)/attendance.tsx'), 'utf8').includes('findSession'));
+check('الحضور لا ينشئ حصة قبل الحفظ', readFileSync(join(root, 'app/(admin)/(tabs)/attendance.tsx'), 'utf8').includes('findSession'));
 check('المسح اليدوي يعمل بلا إذن كاميرا', (() => {
   const code = readFileSync(join(root, 'app/(admin)/scan.tsx'), 'utf8');
   const manualIdx = code.indexOf(") : mode === 'manual' ? (");
@@ -269,6 +279,88 @@ check('تخطي التحديث في وضع التطوير', updater.includes('__
 check('تخطي التحديث في Expo Go', updater.includes("appOwnership === 'expo'"));
 check('التحديث أندرويد فقط', updater.includes("Platform.OS !== 'android'"));
 check('تثبيت APK بالنوع الصحيح', updater.includes('application/vnd.android.package-archive'));
+
+console.log('\n━━ فحص الكود: بنية التنقل الجديدة (رجوع حقيقي بلا وميض) ━');
+check('(admin) تخطيط Stack أب (تبويبات + شاشات داخلية)',
+  readFileSync(join(root, 'app/(admin)/_layout.tsx'), 'utf8').includes('<Stack'));
+check('(admin) الرجوع بتلاشٍ داكن (fade + contentStyle داكن)', (() => {
+  const c = readFileSync(join(root, 'app/(admin)/_layout.tsx'), 'utf8');
+  return c.includes("animation: 'fade'") && c.includes('contentStyle');
+})());
+check('(student) تخطيط Stack أب مثل الإدارة', (() => {
+  const c = readFileSync(join(root, 'app/(student)/_layout.tsx'), 'utf8');
+  return c.includes('<Stack') && c.includes("animation: 'fade'") && c.includes('contentStyle');
+})());
+check('(admin) تبويبات داخل (tabs) مع backBehavior=history',
+  readFileSync(join(root, 'app/(admin)/(tabs)/_layout.tsx'), 'utf8').includes('backBehavior="history"'));
+check('(student) تبويبات داخل (tabs) مع backBehavior=history',
+  readFileSync(join(root, 'app/(student)/(tabs)/_layout.tsx'), 'utf8').includes('backBehavior="history"'));
+check('شاشات التبويبات الخمس للمسئول موجودة في (tabs)', (() => {
+  for (const n of ['dashboard', 'students', 'groups', 'attendance', 'more']) {
+    try { readFileSync(join(root, `app/(admin)/(tabs)/${n}.tsx`)); } catch { return false; }
+  }
+  return true;
+})());
+check('شاشات التبويبات الخمس للطالب موجودة في (tabs)', (() => {
+  for (const n of ['home', 'my-attendance', 'my-grades', 'my-payments', 'profile']) {
+    try { readFileSync(join(root, `app/(student)/(tabs)/${n}.tsx`)); } catch { return false; }
+  }
+  return true;
+})());
+
+console.log('\n━━ فحص الكود: الوضع الفاتح والداكن ━');
+check('مزوّد الثيم موجود ويحفظ الاختيار', (() => {
+  const c = readFileSync(join(root, 'src/lib/themeContext.tsx'), 'utf8');
+  return c.includes('ThemeProvider') && c.includes('AsyncStorage') && c.includes('mrcenter.theme.mode');
+})());
+check('لوحتا الألوان (داكن + فاتح) في الثيم', (() => {
+  const c = readFileSync(join(root, 'src/theme.ts'), 'utf8');
+  return c.includes('const LIGHT: Palette') && c.includes('const DARK: Palette') && c.includes('themedStyles');
+})());
+check('كل الأنماط تتبع الثيم (لا StyleSheet.create عارية على مستوى الوحدة)', (() => {
+  const files = [...walk(join(root, 'app')), ...walk(join(root, 'src'))];
+  return files.every((f) => !readFileSync(f, 'utf8').includes('const styles = StyleSheet.create('));
+})());
+check('شريط الحالة يتبع الوضع في GradientScreen', (() => {
+  const c = readFileSync(join(root, 'src/components/layout.tsx'), 'utf8');
+  return c.includes("barStyle={colors.isDark ? 'light-content' : 'dark-content'}");
+})());
+check('لا أثر بنفسجي قديم في الكود', (() => {
+  const files = [...walk(join(root, 'app')), ...walk(join(root, 'src'))];
+  return files.every((f) => !readFileSync(f, 'utf8').includes('124,58,237'));
+})());
+check('زر تبديل الوضع في الترحيب', readFileSync(join(root, 'app/index.tsx'), 'utf8').includes('ThemeIconButton'));
+check('تبديل الوضع في قائمة المزيد', readFileSync(join(root, 'app/(admin)/(tabs)/more.tsx'), 'utf8').includes('ThemeToggleRow'));
+check('تبديل الوضع في حساب الطالب', readFileSync(join(root, 'app/(student)/(tabs)/profile.tsx'), 'utf8').includes('ThemeToggleRow'));
+check('تبديل الوضع في صفحة حول التطبيق', readFileSync(join(root, 'app/about.tsx'), 'utf8').includes('ThemeToggleRow'));
+check('app.json يدعم الوضعين (automatic)', JSON.parse(readFileSync(join(root, 'app.json'), 'utf8')).expo.userInterfaceStyle === 'automatic');
+
+console.log('\n━━ فحص الكود: تحسينات هذه الجلسة ━');
+check('تجميع البثوث في مكتبة قابلة للاختبار', (() => {
+  const lib = readFileSync(join(root, 'src/lib/broadcast.ts'), 'utf8');
+  const ui = readFileSync(join(root, 'app/developer/broadcast.tsx'), 'utf8');
+  return lib.includes('groupBroadcasts') && ui.includes("from '../../src/lib/broadcast'")
+    && ui.includes("like('title', 'المطور: %')");
+})());
+check('النوافذ المنبثقة الحديثة (DetailSheet) مستخدمة في الإعلانات', (() => {
+  const sheet = readFileSync(join(root, 'src/components/DetailSheet.tsx'), 'utf8');
+  const admin = readFileSync(join(root, 'app/(admin)/announcements.tsx'), 'utf8');
+  const student = readFileSync(join(root, 'app/(student)/(tabs)/home.tsx'), 'utf8');
+  return sheet.includes('DetailSheet') && admin.includes('DetailSheet') && student.includes('AnnouncementCard');
+})());
+check('سجل معاملات المالك (تاريخ الاشتراكات) في صفحة الباقات', (() => {
+  const api = readFileSync(join(root, 'src/lib/api.ts'), 'utf8');
+  const ui = readFileSync(join(root, 'app/(admin)/subscription.tsx'), 'utf8');
+  return api.includes('fetchSubscriptionsHistory') && ui.includes('سجل المعاملات مع المطور');
+})());
+check('رسالة حد الإرسال معربة وموسعة', (() => {
+  const c = readFileSync(join(root, 'src/lib/utils.ts'), 'utf8');
+  return c.includes('over_request_rate_limit') && c.includes('once every 60 seconds') && c.includes('429');
+})());
+check('الإصدار مرفوع 1.1.0 مع versionCode 2', (() => {
+  const j = JSON.parse(readFileSync(join(root, 'app.json'), 'utf8'));
+  return j.expo.version === '1.1.0' && j.expo.android.versionCode === 2;
+})());
 
 console.log(`\n━━━ النتيجة: ${passed} فحص ناجح / ${failed} فاشل ━━━\n`);
 process.exit(failed ? 1 : 0);

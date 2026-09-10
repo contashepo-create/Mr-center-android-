@@ -8,18 +8,19 @@ import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import { Card, ListItem, LoadingView, SectionTitle, StatCard } from '../../src/components/controls';
-import { GradientScreen, KeyboardScreen } from '../../src/components/layout';
+import { Card, ListItem, LoadingView, SectionTitle, StatCard } from '../../../src/components/controls';
+import { GradientScreen, KeyboardScreen } from '../../../src/components/layout';
+import { AnnouncementCard, DetailSheet } from '../../../src/components/DetailSheet';
 import {
   fetchAnnouncements, fetchDuesForStudent, fetchGroups, fetchHonorees, fetchMyAttendance,
   fetchMyCenter, fetchMyNotifications, fetchStudentById,
-} from '../../src/lib/api';
-import type { Honoree } from '../../src/lib/api';
-import { encodeStudentQr } from '../../src/lib/qr';
-import { useSession } from '../../src/lib/session';
-import type { Announcement, Center, Group, Student } from '../../src/lib/types';
-import { formatDays, todayIso } from '../../src/lib/utils';
-import { colors, font, gradients, radius, spacing } from '../../src/theme';
+} from '../../../src/lib/api';
+import type { Honoree } from '../../../src/lib/api';
+import { encodeStudentQr } from '../../../src/lib/qr';
+import { useSession } from '../../../src/lib/session';
+import type { Announcement, Center, Group, Student } from '../../../src/lib/types';
+import { formatDays, formatDate, todayIso } from '../../../src/lib/utils';
+import { colors, font, gradients, radius, spacing, themedStyles } from '../../../src/theme';
 
 export default function StudentHome() {
   const { profile } = useSession();
@@ -31,6 +32,7 @@ export default function StudentHome() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [stats, setStats] = useState({ present: 0, absent: 0, pendingDues: 0 });
   const [loading, setLoading] = useState(true);
+  const [viewingAnn, setViewingAnn] = useState<Announcement | null>(null);
 
   const load = useCallback(async () => {
     if (!profile?.center_id || !profile.student_id) { setLoading(false); return; }
@@ -197,22 +199,33 @@ export default function StudentHome() {
           </Card>
         ) : (
           announcements.map((a) => (
-            <ListItem
+            <AnnouncementCard
               key={a.id}
               title={a.title}
-              subtitle={a.body}
-              icon="megaphone"
-              iconColor={a.pinned ? colors.warning : colors.info}
-              badge={a.pinned ? { text: 'مثبت', color: colors.warning, bg: colors.warningBg } : undefined}
+              body={a.body}
+              pinned={a.pinned}
+              meta={formatDate(a.created_at)}
+              onPress={() => setViewingAnn(a)}
             />
           ))
         )}
       </KeyboardScreen>
+
+      {/* عرض إعلان كامل بنافذة حديثة */}
+      <DetailSheet
+        visible={!!viewingAnn}
+        onClose={() => setViewingAnn(null)}
+        icon="megaphone"
+        tint={viewingAnn?.pinned ? 'warning' : 'info'}
+        title={viewingAnn?.title ?? ''}
+        meta={`من إدارة ${center?.name ?? 'السنتر'} · ${formatDate(viewingAnn?.created_at ?? '')}`}
+        body={viewingAnn?.body ?? ''}
+      />
     </GradientScreen>
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   heroCard: {
     borderRadius: radius.lg, padding: spacing.xl, marginTop: spacing.md,
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
@@ -261,4 +274,4 @@ const styles = StyleSheet.create({
     padding: spacing.lg, marginTop: spacing.lg,
   },
   qrName: { color: colors.text, fontSize: font.md, fontWeight: '800', marginTop: spacing.md, textAlign: 'center' },
-});
+}));

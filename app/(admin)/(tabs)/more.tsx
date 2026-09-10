@@ -10,15 +10,16 @@ import { Alert, Share, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { AppButton, Card, ListItem, SectionTitle } from '../../src/components/controls';
-import { GradientScreen, KeyboardScreen } from '../../src/components/layout';
-import { fetchMyCenter } from '../../src/lib/api';
-import { isOwner } from '../../src/lib/staff';
-import { useSession } from '../../src/lib/session';
-import { encodeCenterQr } from '../../src/lib/qr';
-import type { Center } from '../../src/lib/types';
-import { arabicError } from '../../src/lib/utils';
-import { colors, font, gradients, radius, spacing } from '../../src/theme';
+import { AppButton, Card, ListItem, SectionTitle } from '../../../src/components/controls';
+import { ThemeToggleRow } from '../../../src/components/ThemeToggle';
+import { GradientScreen, KeyboardScreen } from '../../../src/components/layout';
+import { fetchMyCenter } from '../../../src/lib/api';
+import { isOwner } from '../../../src/lib/staff';
+import { useSession } from '../../../src/lib/session';
+import { encodeCenterQr } from '../../../src/lib/qr';
+import type { Center } from '../../../src/lib/types';
+import { arabicError } from '../../../src/lib/utils';
+import { colors, font, gradients, radius, spacing, themedStyles } from '../../../src/theme';
 
 export default function MoreScreen() {
   const { profile, signOut } = useSession();
@@ -156,6 +157,7 @@ export default function MoreScreen() {
         <ListItem title="دليل الاستخدام" subtitle="شرح كل قسم خطوة بخطوة" icon="book" iconColor={colors.textSecondary} onPress={() => router.push('/guide')} />
 
         <SectionTitle title="عام" />
+        <ThemeToggleRow />
         <ListItem title="حول التطبيق" subtitle="معلومات التطبيق والتواصل" icon="information-circle" iconColor={colors.textSecondary} onPress={() => router.push('/about')} />
         <ListItem title="تسجيل الخروج" subtitle={profile?.email ?? ''} icon="log-out" iconColor={colors.danger} onPress={confirmSignOut} />
       </KeyboardScreen>
@@ -163,7 +165,7 @@ export default function MoreScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   centerCard: {
     borderRadius: radius.lg, padding: spacing.xl, marginTop: spacing.md,
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
@@ -179,4 +181,4 @@ const styles = StyleSheet.create({
   qrName: { color: colors.text, fontSize: font.lg, fontWeight: '900', marginTop: spacing.md, textAlign: 'center' },
   qrCode: { color: colors.cyan, fontSize: font.md, fontWeight: '800', marginTop: 4, letterSpacing: 2 },
   qrHint: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'center', marginTop: spacing.sm, lineHeight: 20 },
-});
+}));

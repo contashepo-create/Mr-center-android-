@@ -18,7 +18,7 @@ import {
 import { useSession } from '../../src/lib/session';
 import type { Due, Group, Student } from '../../src/lib/types';
 import { arabicError, arabicMonth, billingLabel, formatMoney } from '../../src/lib/utils';
-import { colors, font, spacing } from '../../src/theme';
+import { colors, font, spacing, themedStyles } from '../../src/theme';
 
 export default function PaymentsScreen() {
   const { profile } = useSession();
@@ -227,7 +227,7 @@ export default function PaymentsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   cardTitle: {
     color: colors.text, fontSize: font.md, fontWeight: '800',
     marginBottom: spacing.md, textAlign: 'right',
@@ -235,4 +235,4 @@ const styles = StyleSheet.create({
   allPaid: {
     color: colors.success, fontSize: font.md, fontWeight: '700', textAlign: 'center',
   },
-});
+}));

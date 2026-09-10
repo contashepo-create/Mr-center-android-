@@ -9,10 +9,11 @@ import { router } from 'expo-router';
 import React, { useRef } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppButton } from '../src/components/controls';
+import { ThemeIconButton } from '../src/components/ThemeToggle';
 import { GradientScreen, KeyboardScreen } from '../src/components/layout';
 import { useSession } from '../src/lib/session';
 import { ConnectionSetup } from '../src/components/ConnectionSetup';
-import { colors, font, gradients, radius, shadow, spacing } from '../src/theme';
+import { colors, font, gradients, radius, shadow, spacing, themedStyles } from '../src/theme';
 
 export default function WelcomeScreen() {
   const { ready, configured, session, profile } = useSession();
@@ -55,6 +56,10 @@ export default function WelcomeScreen() {
 
   return (
     <GradientScreen>
+      {/* زر تبديل الوضع الفاتح/الداكن */}
+      <View style={styles.themeBtnWrap} pointerEvents="box-none">
+        <ThemeIconButton />
+      </View>
       <KeyboardScreen>
         {/* الشعار — ضغطة مطولة ٥ ثواني تفتح بوابة المطور المخفية */}
         <View style={styles.hero}>
@@ -149,9 +154,12 @@ export default function WelcomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   centerFill: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   loadingText: { color: colors.textSecondary, marginTop: spacing.lg, fontSize: font.md },
+  themeBtnWrap: {
+    position: 'absolute', top: spacing.lg, left: spacing.lg, zIndex: 10,
+  },
   hero: { alignItems: 'center', marginTop: spacing.xxl * 1.6, marginBottom: spacing.xxl },
   logoGlow: { ...shadow.glow },
   logoRing: {
@@ -181,4 +189,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted, fontSize: font.xs, textAlign: 'center',
     marginTop: spacing.xxl, lineHeight: 18,
   },
-});
+}));

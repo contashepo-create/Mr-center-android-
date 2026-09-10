@@ -293,6 +293,50 @@ try {
   await expectThrow('الموقوف يُمنع من الكتابة', () =>
     tea.from('attendance').insert({ id: `aty-${ts}`, center_id: centerId, session_id: sess.id, student_id: linkedId, status: 'present' }));
 
+  // ═══ 5.5) أدوار المدير/السكرتير وحدود الباقة خادمياً (التجريبية = حدود الشامل) ═══
+  console.log('\n━━ المدير والسكرتير وحدود الباقة ━');
+  const mkStaff = async (tag, role, phone) => {
+    const em = E(tag);
+    await makeConfirmedUser(em, ownerPass);
+    const c = await signIn(em, ownerPass);
+    const uid = (await c.auth.getUser()).data.user.id;
+    const { error } = await c.rpc('register_staff_account', {
+      p_center_id: centerId, p_full_name: `فريق ${tag}`, p_phone: phone, p_role: role,
+    });
+    return { c, uid, error };
+  };
+  {
+    const mgr = await mkStaff('mgr', 'manager', `010${String(Number(String(ts).slice(-8)) + 44)}`);
+    ok('تسجيل مدير خامل', !mgr.error, mgr.error?.message?.slice(0, 80));
+    const { error: actMgr } = await owner.from('profiles').update({ is_active: true }).eq('id', mgr.uid);
+    ok('تفعيل المدير الأول (حد الباقة 1)', !actMgr, actMgr?.message?.slice(0, 80));
+    const mgr2 = await mkStaff('mgr2', 'manager', `010${String(Number(String(ts).slice(-8)) + 55)}`);
+    const { error: actMgr2 } = await owner.from('profiles').update({ is_active: true }).eq('id', mgr2.uid);
+    ok('مدير ثانٍ يُرفض خادمياً (staff_limit_reached)',
+      !!actMgr2 && String(actMgr2.message).includes('staff_limit_reached'), actMgr2?.message?.slice(0, 90));
+    const sec1 = await mkStaff('sec1', 'secretary', `010${String(Number(String(ts).slice(-8)) + 66)}`);
+    const { error: actS1 } = await owner.from('profiles').update({ is_active: true }).eq('id', sec1.uid);
+    ok('تفعيل السكرتير الأول', !actS1, actS1?.message?.slice(0, 80));
+    const sec2 = await mkStaff('sec2', 'secretary', `010${String(Number(String(ts).slice(-8)) + 77)}`);
+    const { error: actS2 } = await owner.from('profiles').update({ is_active: true }).eq('id', sec2.uid);
+    ok('تفعيل السكرتير الثاني (حد التجريبية 2)', !actS2, actS2?.message?.slice(0, 80));
+    const sec3 = await mkStaff('sec3', 'secretary', `010${String(Number(String(ts).slice(-8)) + 88)}`);
+    const { error: actS3 } = await owner.from('profiles').update({ is_active: true }).eq('id', sec3.uid);
+    ok('سكرتير ثالث يُرفض خادمياً',
+      !!actS3 && String(actS3.message).includes('staff_limit_reached'), actS3?.message?.slice(0, 90));
+    // السكرتير المفعّل يعمل داخل سنتره (كتابة إعلان) ولا يرى سنتراً آخر
+    await sec1.c.from('announcements').insert({ id: `anx-${ts}`, center_id: centerId, title: 'سكرتير', body: 'كتب' });
+    const { data: secPeek } = await sec1.c.from('students').select('id').eq('center_id', center2).limit(1);
+    ok('السكرتير يكتب بسنتره ولا يرى الآخر', (secPeek ?? []).length === 0);
+    // الحساب المنفرد (solo) يرفض أي فريق
+    const soloEmail = E('soloStaff');
+    await makeConfirmedUser(soloEmail, ownerPass);
+    const soloStaff = await signIn(soloEmail, ownerPass);
+    await expectThrow('الحساب المنفرد بلا فريق (staff_not_allowed)', () =>
+      soloStaff.rpc('register_staff_account', { p_center_id: center2, p_full_name: 'x', p_phone: '0100000001', p_role: 'teacher' }), 'staff_not_allowed');
+
+  }
+
   // ═══ 6) مطور: إيقاف يفعّل الحظر ═══
   console.log('\n━━ مطور ━');
   const devEmail = E('dev');
@@ -319,6 +363,20 @@ try {
     ok('الإيقاف يفعّل الحظر', sub2?.status === 'suspended', JSON.stringify(sub2));
     await dev.from('centers').update({ status: 'active' }).eq('id', centerId);
     ok('إعادة التفعيل', true);
+
+    // ═══ 6.5) قناة المطور↔المالك + سجل المعاملات ═══
+    console.log('\n━━ قناة المطور وسجل المعاملات ━');
+    await dev.from('app_notifications').insert({
+      id: `ntb-${ts}`, center_id: centerId, audience: 'owners', title: 'المطور: تنبيه للمالك', body: 'رسالة قناة المالك',
+    });
+    const ownerB = await signIn(ownerEmail, ownerPass);
+    const { data: ownerNotifs } = await ownerB.from('app_notifications').select('id').eq('id', `ntb-${ts}`);
+    ok('المالك يستلم بث قناة المالك', (ownerNotifs ?? []).length === 1);
+    const ownerBUid = (await ownerB.auth.getUser()).data.user.id;
+    const { error: readErr } = await ownerB.from('app_notification_reads').insert({
+      id: `nrb-${ts}`, center_id: centerId, notification_id: `ntb-${ts}`, student_id: ownerBUid,
+    });
+    ok('تعليم المقروء بمعرف حساب المالك', !readErr, readErr?.message?.slice(0, 80));
   } else {
     ok('تهيئة المطور', false, 'تعذر جلب المستخدم');
   }
@@ -347,6 +405,10 @@ try {
     });
     const { data: acts } = await ownerRe2.from('activity_log').select('id').eq('center_id', centerId).limit(5);
     ok('سجل العمليات يعمل', (acts ?? []).length >= 1);
+    const { data: subHistory } = await ownerRe2.from('center_subscriptions').select('plan_type').eq('center_id', centerId).order('created_at');
+    ok('سجل معاملات المالك (تجريبية + المعتمدة) يقرأ',
+      (subHistory ?? []).length >= 2 && subHistory.some((s) => s.plan_type === 'trial') && subHistory.some((s) => s.plan_type === 'center_full'),
+      JSON.stringify(subHistory?.map((s) => s.plan_type)));
     const { error: limErr } = await ownerRe2.from('profiles').update({ is_active: true }).eq('id', teaUid);
     ok('تفعيل ضمن الحد مسموح', !limErr, limErr?.message?.slice(0, 80));
   }
