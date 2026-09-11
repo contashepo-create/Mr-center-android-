@@ -994,7 +994,13 @@ BEGIN
     v_type := COALESCE(v_q ->> 'type', 'mcq');
     v_marks := COALESCE(NULLIF(v_q ->> 'marks', '')::NUMERIC, 1);
     v_total_marks := v_total_marks + v_marks;
-    IF v_type IN ('essay', 'correct', 'short') THEN
+    IF v_type = 'correct' AND (v_exam.answers -> i) IS NOT NULL
+      AND (v_exam.answers -> i) = (COALESCE(p_answers, '[]'::jsonb) -> i) THEN
+      -- «صحّح الخطأ»: مطابقة تامة للنموذج = درجة آلية بلا مراجعة
+      v_correct := v_correct + 1;
+      v_earned := v_earned + v_marks;
+    ELSIF v_type IN ('essay', 'correct', 'short') THEN
+      -- مقالي / صحّح غير مطابق / قصير — قيد مراجعة المعلم
       v_has_essay := true;
     ELSIF (v_exam.answers -> i) IS NOT NULL
       AND (v_exam.answers -> i) = (COALESCE(p_answers, '[]'::jsonb) -> i) THEN

@@ -147,6 +147,7 @@ check('قناة owners للمطور (قيد + سياسات)', has("'owners'") &&
 check('جدول قناة الدعم (مالك ↔ مطور)', has('CREATE TABLE IF NOT EXISTS public.support_messages'));
 check('سياسات قناة الدعم الثلاث', has('"support_owner_read"') && has('"support_owner_insert"') && has('"support_super_admin"'));
 check('الأنواع اليدوية للامتحانات تُراجع خادمياً', has("v_type IN ('essay', 'correct', 'short')"));
+check('صحّح الخطأ بالمطابقة التامة تُحسب آلياً', has("v_type = 'correct' AND (v_exam.answers -> i) IS NOT NULL"));
 check('حالة مراجعة المحاولة (pending_review)', has('pending_review'));
 check('تصحيح بدرجات لكل سؤال وأنواع أسئلة', has('mcq') && has('essay'));
 check('get_published_exams للمصادقين فقط',

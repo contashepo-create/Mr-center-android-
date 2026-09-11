@@ -234,10 +234,11 @@ try {
   }).select().single();
   const { data: res8 } = await stu.rpc('submit_exam_attempt', {
     p_exam_id: exam8.id,
-    p_answers: [[0, 1], norm('عاصمه'), [0, 1], 'ذهب أحمد إلى المدرسة'], // multi مرتبة كما يرسلها التطبيق
+    // multi مرتبة كما يرسلها التطبيق · صحّح = النموذج حرفياً (تُحسب آلياً)
+    p_answers: [[0, 1], norm('عاصمه'), [0, 1], 'ذهبَ أحمدُ إلى المدرسة'],
   });
-  ok('متعدد/أكمل/وصل تلقائي + صحّح بالمطابقة التامة = 7/7',
-    res8?.score === 7 && res8?.status === 'pending_review' && res8?.correct === 4, JSON.stringify(res8));
+  ok('متعدد/أكمل/وصل تلقائي + صحّح بالمطابقة التامة = 7/7 آلي بلا مراجعة',
+    res8?.score === 7 && res8?.status === 'graded' && res8?.correct === 4, JSON.stringify(res8));
   const { data: res8b } = await stu2.rpc('submit_exam_attempt', {
     p_exam_id: exam8.id,
     p_answers: [[0], 'غلط', [1, 0], 'ما عرفت'],
@@ -405,18 +406,19 @@ try {
     // ═══ 6.45) قناة الدعم الثنائية (قبل قناة البث) ═══
     console.log('\n━━ قناة الدعم (مالك ↔ مطور) ━');
     const ownerSup = await signIn(ownerEmail, ownerPass);
+    // id الجدول UUID ذاتي التوليد — لا نمرر معرفاً مخصصاً
     const { error: supInsErr } = await ownerSup.from('support_messages').insert({
-      id: `sm-${ts}`, center_id: centerId, sender_role: 'owner', sender_name: 'المالك', body: 'عندي مشكلة في الترقية',
+      center_id: centerId, sender_role: 'owner', sender_name: 'المالك', body: `عندي مشكلة في الترقية ${ts}`,
     });
     ok('المالك يرسل للدعم', !supInsErr, supInsErr?.message?.slice(0, 90));
-    const { data: devSees } = await dev.from('support_messages').select('id').eq('center_id', centerId);
-    ok('المطور يرى رسالة الدعم', (devSees ?? []).some((m) => m.id === `sm-${ts}`));
+    const { data: devSees } = await dev.from('support_messages').select('id').eq('center_id', centerId).eq('body', `عندي مشكلة في الترقية ${ts}`);
+    ok('المطور يرى رسالة الدعم', (devSees ?? []).length >= 1);
     const { error: devInsErr } = await dev.from('support_messages').insert({
-      id: `smr-${ts}`, center_id: centerId, sender_role: 'developer', sender_name: 'المطور', body: 'تحت أمرك — تم الحل',
+      center_id: centerId, sender_role: 'developer', sender_name: 'المطور', body: `تحت أمرك — تم الحل ${ts}`,
     });
     ok('المطور يرد على السنتر', !devInsErr, devInsErr?.message?.slice(0, 90));
     const { data: ownerSees } = await ownerSup.from('support_messages').select('*').eq('center_id', centerId).order('created_at');
-    ok('المالك يرى رد المطور', (ownerSees ?? []).some((m) => m.id === `smr-${ts}` && m.body.includes('تحت أمرك')));
+    ok('المالك يرى رد المطور', (ownerSees ?? []).some((m) => m.body === `تحت أمرك — تم الحل ${ts}`));
     // عزل: مالك سنتر آخر لا يرى المحادثة (owner2 من قسم العزل)
     const { data: leak } = await owner2.from('support_messages').select('id').eq('center_id', centerId);
     ok('مالك آخر لا يرى محادثة سنتر غيره', (leak ?? []).length === 0);
