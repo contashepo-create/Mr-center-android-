@@ -1627,3 +1627,84 @@ COMMIT;
 --   ٢) ضبط المصادقة (تفعيل التسجيل + تفعيل تأكيد البريد لمنع الوهمي)
 --   ٣) تشغيل التطبيق وربطه
 -- ============================================================================
+-- Mr Center: entitlements + accounting module (run after android_multitenant_schema.sql)
+ALTER TABLE public.center_subscriptions ADD COLUMN IF NOT EXISTS extra_teachers INTEGER NOT NULL DEFAULT 0 CHECK (extra_teachers >= 0);
+ALTER TABLE public.center_subscriptions ADD COLUMN IF NOT EXISTS extra_secretaries INTEGER NOT NULL DEFAULT 0 CHECK (extra_secretaries >= 0);
+ALTER TABLE public.center_subscriptions ADD COLUMN IF NOT EXISTS extra_managers INTEGER NOT NULL DEFAULT 0 CHECK (extra_managers >= 0);
+ALTER TABLE public.center_subscriptions ADD COLUMN IF NOT EXISTS enabled_features JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE TABLE IF NOT EXISTS public.center_ledger (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(), center_id UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+ kind TEXT NOT NULL CHECK (kind IN ('income','expense')), category TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', amount NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+ occurred_on DATE NOT NULL DEFAULT CURRENT_DATE, created_by UUID REFERENCES auth.users(id), created_by_name TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_center_ledger_center_date ON public.center_ledger(center_id, occurred_on DESC);
+ALTER TABLE public.center_ledger ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS ledger_owner_all ON public.center_ledger;
+CREATE POLICY ledger_owner_all ON public.center_ledger FOR ALL TO authenticated USING (public.admin_owns_center(center_id)) WITH CHECK (public.admin_owns_center(center_id));
+DROP POLICY IF EXISTS ledger_developer_all ON public.center_ledger;
+CREATE POLICY ledger_developer_all ON public.center_ledger FOR ALL TO authenticated USING ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid())) WITH CHECK ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid()));
+
+-- Developer can grant extra staff slots and time-bound paid features.
+CREATE OR REPLACE FUNCTION public.dev_set_entitlements(p_center UUID, p_teachers INT, p_secretaries INT, p_managers INT, p_features JSONB)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+ IF NOT (SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid()) THEN RAISE EXCEPTION 'not_allowed'; END IF;
+ UPDATE public.center_subscriptions SET extra_teachers=GREATEST(p_teachers,0), extra_secretaries=GREATEST(p_secretaries,0), extra_managers=GREATEST(p_managers,0), enabled_features=COALESCE(p_features,'{}') WHERE center_id=p_center AND status='active';
+END; $$;
+GRANT EXECUTE ON FUNCTION public.dev_set_entitlements(UUID,INT,INT,INT,JSONB) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.staff_limit_check() RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE k TEXT; p TEXT; lim INT; used INT; ext INT:=0;
+BEGIN
+ IF NEW.role NOT IN ('teacher','manager','secretary') OR NOT NEW.is_active THEN RETURN NEW; END IF;
+ SELECT kind INTO k FROM public.centers WHERE id=NEW.center_id;
+ SELECT plan_type, CASE WHEN NEW.role='teacher' THEN extra_teachers WHEN NEW.role='secretary' THEN extra_secretaries ELSE extra_managers END INTO p, ext FROM public.center_subscriptions WHERE center_id=NEW.center_id AND status='active' ORDER BY ends_on DESC LIMIT 1;
+ IF NEW.role='manager' THEN lim=CASE WHEN k='solo' THEN 0 ELSE 1 END;
+ ELSIF NEW.role='secretary' THEN lim=CASE WHEN k='solo' THEN 0 WHEN p='center_medium' THEN 1 ELSE 2 END;
+ ELSE lim=CASE WHEN k='solo' THEN 0 WHEN p='center_medium' THEN 2 ELSE 4 END; END IF;
+ SELECT count(*) INTO used FROM public.profiles WHERE center_id=NEW.center_id AND role=NEW.role AND is_active AND id IS DISTINCT FROM NEW.id;
+ IF used >= lim + ext THEN RAISE EXCEPTION 'staff_limit_reached'; END IF; RETURN NEW;
+END; $$;
+DROP TRIGGER IF EXISTS trg_staff_limit_check ON public.profiles;
+CREATE TRIGGER trg_staff_limit_check BEFORE INSERT OR UPDATE OF role,is_active ON public.profiles FOR EACH ROW EXECUTE FUNCTION public.staff_limit_check();
+
+-- تحصيل مرتبط بالمحاسبة: كل دفعة طالب تصبح إيراداً آلياً مع هوية المحصل
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS collected_by UUID REFERENCES auth.users(id);
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS collected_by_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.center_ledger ADD COLUMN IF NOT EXISTS source_payment_id TEXT;
+ALTER TABLE public.center_ledger ADD COLUMN IF NOT EXISTS employee_id UUID;
+ALTER TABLE public.center_ledger ADD COLUMN IF NOT EXISTS entry_type TEXT NOT NULL DEFAULT 'general' CHECK (entry_type IN ('general','salary','advance','bonus','rent','utility','purchase','payment_collection'));
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_payment ON public.center_ledger(source_payment_id) WHERE source_payment_id IS NOT NULL;
+CREATE OR REPLACE FUNCTION public.record_payment_income() RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE cid UUID; nm TEXT;
+BEGIN
+ SELECT center_id INTO cid FROM public.students WHERE id=NEW.student_id;
+ SELECT full_name INTO nm FROM public.profiles WHERE id=COALESCE(NEW.collected_by,auth.uid());
+ IF cid IS NOT NULL THEN INSERT INTO public.center_ledger(center_id,kind,category,description,amount,occurred_on,created_by,created_by_name,source_payment_id,entry_type)
+ VALUES(cid,'income','تحصيل طلاب','تحصيل من طالب رقم '||NEW.student_id,NEW.amount,NEW.payment_date,COALESCE(NEW.collected_by,auth.uid()),COALESCE(NEW.collected_by_name,nm,''),NEW.id,'payment_collection') ON CONFLICT DO NOTHING; END IF;
+ RETURN NEW;
+END; $$;
+DROP TRIGGER IF EXISTS trg_payment_income ON public.payments;
+CREATE TRIGGER trg_payment_income AFTER INSERT ON public.payments FOR EACH ROW EXECUTE FUNCTION public.record_payment_income();
+
+-- صلاحيات إضافية مؤقتة لكل سنتر (تدار من لوحة المطور)
+CREATE TABLE IF NOT EXISTS public.center_entitlements (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(), center_id UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+ extra_teachers INT NOT NULL DEFAULT 0 CHECK(extra_teachers>=0), extra_secretaries INT NOT NULL DEFAULT 0 CHECK(extra_secretaries>=0), extra_managers INT NOT NULL DEFAULT 0 CHECK(extra_managers>=0),
+ feature_key TEXT NOT NULL DEFAULT 'staff_expansion', starts_on DATE NOT NULL DEFAULT CURRENT_DATE, ends_on DATE, is_open_ended BOOLEAN NOT NULL DEFAULT false,
+ created_by UUID REFERENCES auth.users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now(), CHECK(is_open_ended OR ends_on IS NOT NULL), UNIQUE(center_id,feature_key)
+);
+ALTER TABLE public.center_entitlements ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS entitlements_owner_read ON public.center_entitlements;
+CREATE POLICY entitlements_owner_read ON public.center_entitlements FOR SELECT TO authenticated USING (public.admin_owns_center(center_id));
+DROP POLICY IF EXISTS entitlements_dev_all ON public.center_entitlements;
+CREATE POLICY entitlements_dev_all ON public.center_entitlements FOR ALL TO authenticated USING ((SELECT role='super_admin' FROM public.profiles WHERE id=auth.uid())) WITH CHECK ((SELECT role='super_admin' FROM public.profiles WHERE id=auth.uid()));
+ALTER TABLE public.center_ledger ADD COLUMN IF NOT EXISTS period_month INT;
+ALTER TABLE public.center_ledger ADD COLUMN IF NOT EXISTS period_year INT;
+ALTER TABLE public.center_ledger ADD COLUMN IF NOT EXISTS deduction NUMERIC(12,2) NOT NULL DEFAULT 0;
+CREATE OR REPLACE FUNCTION public.dev_upsert_entitlement(p_center UUID,p_teachers INT,p_secretaries INT,p_managers INT,p_starts DATE,p_ends DATE,p_open BOOLEAN)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ BEGIN
+ IF NOT ((SELECT role='super_admin' FROM public.profiles WHERE id=auth.uid())) THEN RAISE EXCEPTION 'not_allowed'; END IF;
+ INSERT INTO public.center_entitlements(center_id,extra_teachers,extra_secretaries,extra_managers,starts_on,ends_on,is_open_ended,created_by) VALUES(p_center,GREATEST(p_teachers,0),GREATEST(p_secretaries,0),GREATEST(p_managers,0),COALESCE(p_starts,CURRENT_DATE),p_ends,p_open,auth.uid()) ON CONFLICT(center_id,feature_key) DO UPDATE SET extra_teachers=EXCLUDED.extra_teachers,extra_secretaries=EXCLUDED.extra_secretaries,extra_managers=EXCLUDED.extra_managers,starts_on=EXCLUDED.starts_on,ends_on=EXCLUDED.ends_on,is_open_ended=EXCLUDED.is_open_ended,created_by=auth.uid(); END; $$;
+GRANT EXECUTE ON FUNCTION public.dev_upsert_entitlement(UUID,INT,INT,INT,DATE,DATE,BOOLEAN) TO authenticated;

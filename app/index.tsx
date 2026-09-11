@@ -133,8 +133,8 @@ export default function WelcomeScreen() {
           />
           <View style={{ height: spacing.sm }} />
           <AppButton
-            title="انضمام لفريق سنتر"
-            icon="person-add"
+            title="معلومات إضافة فريق العمل"
+            icon="shield-checkmark"
             variant="ghost"
             small
             onPress={() => router.push('/auth/register-teacher')}
