@@ -267,7 +267,10 @@ check('الموقوف يُطرد والحارس يوجّه المطور', layout
 check('زر نسخ رسالة الخطأ', readFileSync(join(root, 'src/components/pickers.tsx'), 'utf8').includes('expo-clipboard'));
 check('الكاميرا بلا أطفال (طبقة عائمة منفصلة)', (() => {
   const code = readFileSync(join(root, 'app/(admin)/scan.tsx'), 'utf8');
-  return code.includes('/>\n          {/* طبقة الإطار فوق الكاميرا');
+  const open = code.indexOf('<CameraView');
+  const closed = code.indexOf('/>', open);
+  const overlay = code.indexOf('طبقة الإطار فوق الكاميرا');
+  return open > 0 && closed > open && overlay > closed;
 })());
 check('لوحة المطور: كل Hooks قبل البوابة', (() => {
   const code = readFileSync(join(root, 'app/developer/index.tsx'), 'utf8');
