@@ -1744,3 +1744,14 @@ BEGIN
  RETURNING id INTO result; RETURN result;
 END; $$;
 GRANT EXECUTE ON FUNCTION public.submit_staff_custody(UUID,DATE,NUMERIC,TEXT) TO authenticated;
+
+-- اعتماد العهدة وتصحيح حالتها من صاحب السنتر فقط
+CREATE OR REPLACE FUNCTION public.review_staff_custody(p_id UUID, p_status TEXT, p_notes TEXT DEFAULT '')
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+ IF p_status NOT IN ('matched','shortage','surplus','open') THEN RAISE EXCEPTION 'invalid_status'; END IF;
+ UPDATE public.staff_custody SET status=p_status, notes=CASE WHEN p_notes='' THEN notes ELSE p_notes END
+ WHERE id=p_id AND public.admin_owns_center(center_id);
+ IF NOT FOUND THEN RAISE EXCEPTION 'not_found'; END IF;
+END; $$;
+GRANT EXECUTE ON FUNCTION public.review_staff_custody(UUID,TEXT,TEXT) TO authenticated;
