@@ -1659,7 +1659,12 @@ DECLARE k TEXT; p TEXT; lim INT; used INT; ext INT:=0;
 BEGIN
  IF NEW.role NOT IN ('teacher','manager','secretary') OR NOT NEW.is_active THEN RETURN NEW; END IF;
  SELECT kind INTO k FROM public.centers WHERE id=NEW.center_id;
- SELECT plan_type, CASE WHEN NEW.role='teacher' THEN extra_teachers WHEN NEW.role='secretary' THEN extra_secretaries ELSE extra_managers END INTO p, ext FROM public.center_subscriptions WHERE center_id=NEW.center_id AND status='active' ORDER BY ends_on DESC LIMIT 1;
+ SELECT plan_type, CASE WHEN NEW.role='teacher' THEN extra_teachers WHEN NEW.role='secretary' THEN extra_secretaries ELSE extra_managers END INTO p, ext FROM public.center_subscriptions WHERE center_id=NEW.center_id AND status='active' AND (starts_on IS NULL OR starts_on <= CURRENT_DATE) AND (ends_on IS NULL OR ends_on >= CURRENT_DATE) ORDER BY ends_on DESC NULLS LAST LIMIT 1;
+ -- Temporary paid entitlements are additive and only count while active.
+ SELECT COALESCE(ext,0) + COALESCE(SUM(CASE WHEN NEW.role='teacher' THEN extra_teachers WHEN NEW.role='secretary' THEN extra_secretaries ELSE extra_managers END),0)
+ INTO ext FROM public.center_entitlements
+ WHERE center_id=NEW.center_id AND feature_key='staff_expansion'
+   AND starts_on <= CURRENT_DATE AND (is_open_ended OR ends_on >= CURRENT_DATE);
  IF NEW.role='manager' THEN lim=CASE WHEN k='solo' THEN 0 ELSE 1 END;
  ELSIF NEW.role='secretary' THEN lim=CASE WHEN k='solo' THEN 0 WHEN p='center_medium' THEN 1 ELSE 2 END;
  ELSE lim=CASE WHEN k='solo' THEN 0 WHEN p='center_medium' THEN 2 ELSE 4 END; END IF;

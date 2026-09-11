@@ -5,7 +5,7 @@
 import React, { useCallback, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { AppButton, Card, EmptyState, LoadingView, SectionTitle } from '../../src/components/controls';
+import { AppButton, AppInput, Card, EmptyState, LoadingView, SectionTitle } from '../../src/components/controls';
 import { DeveloperGate } from '../../src/components/DeveloperGate';
 import { BackHeader, GradientScreen, KeyboardScreen } from '../../src/components/layout';
 import { FormMessage, OptionPicker } from '../../src/components/pickers';
@@ -14,6 +14,7 @@ import {
   devUpsertSubscription, logActivity, type CenterWithSub,
 } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
+import { getSupabase } from '../../src/lib/supabase';
 import { planLabel, PRODUCTS } from '../../src/lib/billing';
 import type { PlanType, SubscriptionRequest } from '../../src/lib/types';
 import { arabicError, formatDate, formatMoney } from '../../src/lib/utils';
@@ -31,6 +32,12 @@ export default function DevSubscriptionsScreen() {
   const [durationIdx, setDurationIdx] = useState('0');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [extraTeachers, setExtraTeachers] = useState('0');
+  const [extraSecretaries, setExtraSecretaries] = useState('0');
+  const [extraManagers, setExtraManagers] = useState('0');
+  const [entitlementStart, setEntitlementStart] = useState(new Date().toISOString().slice(0, 10));
+  const [entitlementEnd, setEntitlementEnd] = useState('');
+  const [openEnded, setOpenEnded] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -72,6 +79,24 @@ export default function DevSubscriptionsScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const saveEntitlement = async () => {
+    if (!selected) return;
+    const teachers = Math.max(0, Number(extraTeachers) || 0);
+    const secretaries = Math.max(0, Number(extraSecretaries) || 0);
+    const managers = Math.max(0, Number(extraManagers) || 0);
+    if (!openEnded && !entitlementEnd) { Alert.alert('بيانات ناقصة', 'أدخل تاريخ انتهاء الزيادة أو اختر مفتوحة بلا نهاية'); return; }
+    setBusy(true);
+    try {
+      const { error } = await getSupabase().rpc('dev_upsert_entitlement', {
+        p_center: selected.id, p_teachers: teachers, p_secretaries: secretaries, p_managers: managers,
+        p_starts: entitlementStart || null, p_ends: openEnded ? null : entitlementEnd, p_open: openEnded,
+      });
+      if (error) throw error;
+      setMsg('تم حفظ الزيادة، وستؤثر على الحد الخادمي خلال مدة سريانها.');
+    } catch (e) { Alert.alert('تعذر حفظ الزيادة', arabicError(e)); }
+    finally { setBusy(false); }
   };
 
   const suspend = async (c: CenterWithSub) => {
@@ -192,6 +217,18 @@ export default function DevSubscriptionsScreen() {
                 ) : (
                   <Text style={styles.dim}>لا يوجد سجل اشتراك لهذا السنتر</Text>
                 )}
+              </Card>
+
+              <SectionTitle title="زيادة فريق العمل — للمطور" />
+              <Card>
+                <Text style={styles.dimText}>الزيادة مؤقتة وتضاف إلى حد الباقة، ولا تُحتسب قبل تاريخ البداية أو بعد الانتهاء.</Text>
+                <AppInput label="مدرسون إضافيون" value={extraTeachers} onChangeText={setExtraTeachers} keyboardType="number-pad" />
+                <AppInput label="سكرتارية إضافية" value={extraSecretaries} onChangeText={setExtraSecretaries} keyboardType="number-pad" />
+                <AppInput label="مديرون إضافيون" value={extraManagers} onChangeText={setExtraManagers} keyboardType="number-pad" />
+                <AppInput label="تاريخ البداية YYYY-MM-DD" value={entitlementStart} onChangeText={setEntitlementStart} />
+                {!openEnded && <AppInput label="تاريخ النهاية YYYY-MM-DD" value={entitlementEnd} onChangeText={setEntitlementEnd} />}
+                <AppButton title={openEnded ? 'تحويل إلى مدة محددة' : 'مفتوحة بلا نهاية'} icon="time" small variant="outline" onPress={() => setOpenEnded(v => !v)} />
+                <AppButton title="حفظ زيادة الفريق" icon="save" variant="success" onPress={saveEntitlement} loading={busy} />
               </Card>
 
               <SectionTitle title="تفعيل باقة احترافية" />
