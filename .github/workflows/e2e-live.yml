@@ -2,6 +2,8 @@
 # الاختبار الحي E2E — يشغَّل تلقائياً مع كل push على فرع arena/*
 # يقرأ المفاتيح من Repository Secrets فقط (لا مفاتيح في الكود):
 #   E2E_SUPABASE_URL · E2E_ANON_KEY · E2E_SERVICE_KEY
+# مخرجات الاختبار تُكتب في job summary (تُقرأ عبر الـAPI)
+# لأن تنزيل اللوجات الخام محجوب عن بيئة التشغيل لدينا.
 # ============================================================
 name: E2E Live
 
@@ -50,4 +52,29 @@ jobs:
           E2E_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
           E2E_ANON_KEY: ${{ secrets.E2E_ANON_KEY }}
           E2E_SERVICE_KEY: ${{ secrets.E2E_SERVICE_KEY }}
-        run: node scripts/test-e2e-live.mjs
+        run: |
+          set -o pipefail
+          node scripts/test-e2e-live.mjs 2>&1 | tee e2e-output.log
+
+      - name: إتاحة مخرجات الاختبار (summary + annotations)
+        if: always() && steps.keys.outputs.has_keys == 'true'
+        run: |
+          if [ ! -f e2e-output.log ]; then echo "لا مخرجات" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          {
+            echo "## مخرجات الاختبار الحي E2E"
+            echo '```'
+            cat e2e-output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # الفحوص الفاشلة كأنوتيشنز (تظهر فوراً في الـAPI والواجهة)
+          grep -E "❌|💥" e2e-output.log | while IFS= read -r line; do
+            echo "::error::${line:0:240}"
+          done || true
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.keys.outputs.has_keys == 'true'
+        with:
+          name: e2e-output
+          path: e2e-output.log
+          retention-days: 3
+          if-no-files-found: ignore
