@@ -77,7 +77,7 @@ function RouterGuard() {
     } else if (isOwner(profile) || isStaff(profile)) {
       const allowed = ['dashboard', 'students', 'groups', 'attendance', 'more', 'payments',
         'announcements', 'grades-list', 'admin-settings', 'student', 'about', 'scan',
-        'exams', 'inquiries', 'surveys', 'library', 'schedule', 'reports', 'guide', 'whatsapp', 'notifications', 'dev-notices', 'teachers', 'subscription', 'activity', 'support'];
+        'exams', 'inquiries', 'surveys', 'library', 'schedule', 'reports', 'guide', 'whatsapp', 'notifications', 'dev-notices', 'teachers', 'subscription', 'activity', 'support', 'accounting'];
       if (!root || root === 'index' || inAuth || inDev || !allowed.includes(root)) {
         router.replace('/dashboard');
       }
