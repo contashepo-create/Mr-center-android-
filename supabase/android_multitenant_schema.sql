@@ -1713,3 +1713,34 @@ RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ BEGI
  IF NOT ((SELECT role='super_admin' FROM public.profiles WHERE id=auth.uid())) THEN RAISE EXCEPTION 'not_allowed'; END IF;
  INSERT INTO public.center_entitlements(center_id,extra_teachers,extra_secretaries,extra_managers,starts_on,ends_on,is_open_ended,created_by) VALUES(p_center,GREATEST(p_teachers,0),GREATEST(p_secretaries,0),GREATEST(p_managers,0),COALESCE(p_starts,CURRENT_DATE),p_ends,p_open,auth.uid()) ON CONFLICT(center_id,feature_key) DO UPDATE SET extra_teachers=EXCLUDED.extra_teachers,extra_secretaries=EXCLUDED.extra_secretaries,extra_managers=EXCLUDED.extra_managers,starts_on=EXCLUDED.starts_on,ends_on=EXCLUDED.ends_on,is_open_ended=EXCLUDED.is_open_ended,created_by=auth.uid(); END; $$;
 GRANT EXECUTE ON FUNCTION public.dev_upsert_entitlement(UUID,INT,INT,INT,DATE,DATE,BOOLEAN) TO authenticated;
+
+-- ============================================================================
+-- تطوير المحاسبة: العهدة وكشوف الرواتب والتقارير الزمنية
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.staff_custody (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(), center_id UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+ staff_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE, custody_date DATE NOT NULL DEFAULT CURRENT_DATE,
+ expected_amount NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK(expected_amount >= 0), delivered_amount NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK(delivered_amount >= 0),
+ status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','submitted','matched','shortage','surplus')), notes TEXT NOT NULL DEFAULT '',
+ submitted_at TIMESTAMPTZ, submitted_by UUID REFERENCES auth.users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(center_id,staff_id,custody_date)
+);
+ALTER TABLE public.staff_custody ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS custody_owner_all ON public.staff_custody;
+CREATE POLICY custody_owner_all ON public.staff_custody FOR ALL TO authenticated USING (public.admin_owns_center(center_id)) WITH CHECK (public.admin_owns_center(center_id));
+DROP POLICY IF EXISTS custody_staff_read ON public.staff_custody;
+CREATE POLICY custody_staff_read ON public.staff_custody FOR SELECT TO authenticated USING (staff_id=auth.uid());
+
+CREATE OR REPLACE FUNCTION public.submit_staff_custody(p_staff UUID,p_date DATE,p_delivered NUMERIC,p_notes TEXT DEFAULT '')
+RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE cid UUID; expected NUMERIC; result UUID;
+BEGIN
+ SELECT center_id INTO cid FROM public.profiles WHERE id=auth.uid() AND role IN ('manager','secretary') AND is_active;
+ IF cid IS NULL THEN RAISE EXCEPTION 'not_allowed'; END IF;
+ IF p_staff <> auth.uid() THEN RAISE EXCEPTION 'not_allowed'; END IF;
+ SELECT COALESCE(SUM(amount),0) INTO expected FROM public.center_ledger WHERE center_id=cid AND created_by=p_staff AND entry_type='payment_collection' AND occurred_on=p_date;
+ INSERT INTO public.staff_custody(center_id,staff_id,custody_date,expected_amount,delivered_amount,status,notes,submitted_at,submitted_by)
+ VALUES(cid,p_staff,p_date,expected,GREATEST(p_delivered,0),CASE WHEN p_delivered=expected THEN 'matched' WHEN p_delivered<expected THEN 'shortage' ELSE 'surplus' END,COALESCE(p_notes,''),now(),auth.uid())
+ ON CONFLICT(center_id,staff_id,custody_date) DO UPDATE SET expected_amount=EXCLUDED.expected_amount,delivered_amount=EXCLUDED.delivered_amount,status=EXCLUDED.status,notes=EXCLUDED.notes,submitted_at=now(),submitted_by=auth.uid()
+ RETURNING id INTO result; RETURN result;
+END; $$;
+GRANT EXECUTE ON FUNCTION public.submit_staff_custody(UUID,DATE,NUMERIC,TEXT) TO authenticated;
