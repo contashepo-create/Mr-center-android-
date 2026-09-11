@@ -1755,3 +1755,25 @@ BEGIN
  IF NOT FOUND THEN RAISE EXCEPTION 'not_found'; END IF;
 END; $$;
 GRANT EXECUTE ON FUNCTION public.review_staff_custody(UUID,TEXT,TEXT) TO authenticated;
+
+-- عمولات التحصيل: نسبة قابلة للضبط لكل موظف، ولا تغير إجمالي الإيراد
+CREATE TABLE IF NOT EXISTS public.staff_commission_rules (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(), center_id UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+ staff_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE, rate NUMERIC(5,2) NOT NULL DEFAULT 3 CHECK(rate >= 0 AND rate <= 100),
+ starts_on DATE NOT NULL DEFAULT CURRENT_DATE, ends_on DATE, is_active BOOLEAN NOT NULL DEFAULT true, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ UNIQUE(center_id, staff_id)
+);
+ALTER TABLE public.staff_commission_rules ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS commission_owner_all ON public.staff_commission_rules;
+CREATE POLICY commission_owner_all ON public.staff_commission_rules FOR ALL TO authenticated USING (public.admin_owns_center(center_id)) WITH CHECK (public.admin_owns_center(center_id));
+CREATE OR REPLACE FUNCTION public.calculate_staff_commission(p_staff UUID,p_from DATE,p_to DATE)
+RETURNS NUMERIC LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE cid UUID; rate NUMERIC; total NUMERIC;
+BEGIN
+ SELECT center_id INTO cid FROM public.profiles WHERE id=auth.uid() AND role IN ('center_admin','super_admin') AND (role='super_admin' OR center_id=(SELECT center_id FROM public.profiles WHERE id=p_staff));
+ IF cid IS NULL THEN RAISE EXCEPTION 'not_allowed'; END IF;
+ SELECT COALESCE((SELECT rate FROM public.staff_commission_rules WHERE staff_id=p_staff AND center_id=cid AND is_active AND starts_on<=p_to AND (ends_on IS NULL OR ends_on>=p_from) LIMIT 1),0) INTO rate;
+ SELECT COALESCE(SUM(amount),0) INTO total FROM public.center_ledger WHERE center_id=cid AND created_by=p_staff AND entry_type='payment_collection' AND occurred_on BETWEEN p_from AND p_to;
+ RETURN ROUND(total*rate/100,2);
+END; $$;
+GRANT EXECUTE ON FUNCTION public.calculate_staff_commission(UUID,DATE,DATE) TO authenticated;

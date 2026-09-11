@@ -42,3 +42,11 @@ export async function shareReportPdf(html: string, fileName: string): Promise<st
   await Sharing.shareAsync(uri, { dialogTitle: fileName, mimeType: 'application/pdf' });
   return uri;
 }
+
+export function buildPayrollReportHtml(employee: { name: string; role?: string }, period: string, values: { base: number; bonus: number; advances: number; deductions: number; net: number }, operator?: { name?: string; center?: string }): string {
+  return buildReportHtml(`كشف راتب — ${employee.name}`, period, [{ title: 'تفاصيل الاستحقاق', headers: ['البند', 'القيمة'], rows: [['الراتب الأساسي', `${values.base.toFixed(2)} جنيه`], ['المكافآت والعمولات', `${values.bonus.toFixed(2)} جنيه`], ['السلف', `${values.advances.toFixed(2)} جنيه`], ['الخصومات', `${values.deductions.toFixed(2)} جنيه`], ['صافي المستحق', `${values.net.toFixed(2)} جنيه`]] }], operator);
+}
+
+export function buildCustodyReportHtml(title: string, period: string, rows: string[][], operator?: { name?: string; center?: string }): string {
+  return buildReportHtml(title, period, [{ title: 'تسوية العهدة', headers: ['التاريخ', 'المتوقع', 'المسلم', 'الحالة'], rows }], operator);
+}
