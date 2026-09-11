@@ -72,6 +72,17 @@ async function cleanup() {
 }
 
 try {
+  // فحص مسبق: هل المخطط المطبق أحدث نسخة؟ (قناة الدعم علامة على النسخة الحديثة)
+  {
+    const { error: supErr } = await admin.from('support_messages').select('id').limit(1);
+    if (supErr && /does not exist|Could not find/i.test(String(supErr.message))) {
+      console.log('💥 المخطط على القاعدة نسخة قديمة (بلا جدول قناة الدعم support_messages).');
+      console.log('   الحل: افتح ملف supabase/android_multitenant_schema.sql من أحدث فرع وشغّله في Supabase SQL Editor ثم أعد الاختبار.');
+      console.log('   (الملف آمن للتشغيل المتكرر — DROP IF EXISTS + OR REPLACE)');
+      process.exit(1);
+    }
+  }
+
   // تنظيف بقايا اختبارات سابقة (حسابات e2e% وسناتر الاختبار) قبل البدء
   console.log('🧹 مسح مسبق لبقايا سابقة...');
   try {
@@ -394,14 +405,16 @@ try {
     // ═══ 6.45) قناة الدعم الثنائية (قبل قناة البث) ═══
     console.log('\n━━ قناة الدعم (مالك ↔ مطور) ━');
     const ownerSup = await signIn(ownerEmail, ownerPass);
-    await ownerSup.from('support_messages').insert({
+    const { error: supInsErr } = await ownerSup.from('support_messages').insert({
       id: `sm-${ts}`, center_id: centerId, sender_role: 'owner', sender_name: 'المالك', body: 'عندي مشكلة في الترقية',
     });
+    ok('المالك يرسل للدعم', !supInsErr, supInsErr?.message?.slice(0, 90));
     const { data: devSees } = await dev.from('support_messages').select('id').eq('center_id', centerId);
     ok('المطور يرى رسالة الدعم', (devSees ?? []).some((m) => m.id === `sm-${ts}`));
-    await dev.from('support_messages').insert({
+    const { error: devInsErr } = await dev.from('support_messages').insert({
       id: `smr-${ts}`, center_id: centerId, sender_role: 'developer', sender_name: 'المطور', body: 'تحت أمرك — تم الحل',
     });
+    ok('المطور يرد على السنتر', !devInsErr, devInsErr?.message?.slice(0, 90));
     const { data: ownerSees } = await ownerSup.from('support_messages').select('*').eq('center_id', centerId).order('created_at');
     ok('المالك يرى رد المطور', (ownerSees ?? []).some((m) => m.id === `smr-${ts}` && m.body.includes('تحت أمرك')));
     // عزل: مالك سنتر آخر لا يرى المحادثة (owner2 من قسم العزل)
