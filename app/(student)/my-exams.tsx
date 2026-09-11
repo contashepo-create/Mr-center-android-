@@ -1,5 +1,6 @@
 // ============================================================
-// اختبارات الطالب: المنشورة + التأدية بمؤقت + نتائجي
+// اختبارات الطالب: المنشورة + التأدية بمؤقت (٨ أنواع أسئلة)
+// + نتائجي — التصحيح التلقائي خادمي واليدوي عند المعلم
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -11,9 +12,9 @@ import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { FormMessage } from '../../src/components/pickers';
 import { fetchMyExamAttempts, fetchPublishedExams, submitExam } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
-import type { ExamAttempt, PublishedExam } from '../../src/lib/types';
-import { arabicError, formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import type { ExamAnswer, ExamAttempt, ExamQuestionType, PublishedExam } from '../../src/lib/types';
+import { arabicError, EXAM_TYPE_LABEL, formatDate, normalizeAnswerText, seededShuffle } from '../../src/lib/utils';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function StudentExamsScreen() {
   const { profile } = useSession();
@@ -22,7 +23,7 @@ export default function StudentExamsScreen() {
   const [loading, setLoading] = useState(true);
 
   const [taking, setTaking] = useState<PublishedExam | null>(null);
-  const [answers, setAnswers] = useState<(number | string | null)[]>([]);
+  const [answers, setAnswers] = useState<ExamAnswer[]>([]);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const submittedRef = useRef(false);
@@ -44,7 +45,12 @@ export default function StudentExamsScreen() {
 
   const startExam = (e: PublishedExam) => {
     submittedRef.current = false;
-    setAnswers(new Array(e.questions.length).fill(null));
+    // تهيئة الإجابات حسب النوع: وصل = مصفوفة -1 لكل بند يسار، والباقي null
+    setAnswers(e.questions.map((q) => {
+      const t = (q.type ?? 'mcq') as ExamQuestionType;
+      if (t === 'match') return Array((q.pairs ?? []).length).fill(-1) as number[];
+      return null;
+    }));
     setSecondsLeft((e.duration_minutes || 30) * 60);
     setTaking(e);
   };
@@ -53,10 +59,16 @@ export default function StudentExamsScreen() {
     const q = taking?.questions[qi];
     if (!q) return true;
     const t = (q.type ?? 'mcq') as string;
-    return t !== 'essay' && !(q.choices ?? []).length && t !== 'tf';
+    if (t === 'mcq' || t === 'multi') return !(q.choices ?? []).length;
+    if (t === 'match') return (q.pairs ?? []).length < 2;
+    return false;
   };
   const unansweredCount = () => answers.filter((a, qi) => {
     if (isCorrupt(qi)) return false;
+    const q = taking?.questions[qi];
+    const t = (q?.type ?? 'mcq') as string;
+    if (t === 'multi') return !Array.isArray(a) || (a as number[]).length === 0;
+    if (t === 'match') return !Array.isArray(a) || (a as number[]).some((x) => x < 0);
     return a === null || a === -1 || (typeof a === 'string' && !a.trim());
   }).length;
 
@@ -65,13 +77,21 @@ export default function StudentExamsScreen() {
     submittedRef.current = true;
     setSubmitting(true);
     try {
-      const res = await submitExam(taking.id, answers);
+      // أكمل الفراغ: نطبّع نص الطالب قبل التسليم ليطابق النموذج المطبَّع
+      const payload: ExamAnswer[] = taking.questions.map((q, qi) => {
+        const t = (q.type ?? 'mcq') as string;
+        const a = answers[qi];
+        if (t === 'complete' && typeof a === 'string') return normalizeAnswerText(a);
+        if (t === 'multi' && Array.isArray(a)) return [...(a as number[])].sort((x, y) => x - y);
+        return a;
+      });
+      const res = await submitExam(taking.id, payload);
       setTaking(null);
       await load();
       Alert.alert(
         'تم تسليم الامتحان',
         res.status === 'pending_review'
-          ? `استلمنا إجابتك — فيها أسئلة مقالية قيد مراجعة المعلم وستظهر درجتك بعد الاعتماد${auto ? '\n(انتهى الوقت فسُلّم تلقائياً)' : ''}`
+          ? `استلمنا إجابتك — فيها أسئلة كتابية قيد مراجعة المعلم وستظهر درجتك بعد الاعتماد${auto ? '\n(انتهى الوقت فسُلّم تلقائياً)' : ''}`
           : `درجتك: ${res.score} من ${res.max_score}\nإجابات صحيحة: ${res.correct} من ${res.total}${auto ? '\n(انتهى الوقت فسُلّم تلقائياً)' : ''}`,
       );
     } catch (e) {
@@ -105,32 +125,25 @@ export default function StudentExamsScreen() {
         </View>
         <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
           {taking.questions.map((q, qi) => {
-            const qtype = (q.type ?? 'mcq') as 'mcq' | 'tf' | 'essay';
+            const qtype = (q.type ?? 'mcq') as ExamQuestionType;
             const marks = Number((q as { marks?: number }).marks) || 1;
             const options = qtype === 'tf' ? ['صح', 'خطأ'] : (q.choices ?? []);
-            if (qtype !== 'essay' && options.length === 0) {
+            if (isCorrupt(qi)) {
               return (
                 <Card key={qi} style={{ marginBottom: spacing.md }}>
                   <Text style={styles.qText}>{qi + 1}) {q.q}</Text>
-                  <FormMessage type="error" text="سؤال معطوب بلا اختيارات — أبلغ إدارة سنترك وسيُستبعد من التصحيح" />
+                  <FormMessage type="error" text="سؤال معطوب — أبلغ إدارة سنترك وسيُستبعد من التصحيح" />
                 </Card>
               );
             }
             return (
               <Card key={qi} style={{ marginBottom: spacing.md }}>
                 <Text style={styles.qText}>
-                  {qi + 1}) {q.q} [{qtype === 'mcq' ? 'اختياري' : qtype === 'tf' ? 'صح/خطأ' : 'مقالي'} — {marks} درجة]
+                  {qi + 1}) {q.q} [{EXAM_TYPE_LABEL[qtype] ?? qtype} — {marks} درجة]
                 </Text>
-                {qtype === 'essay' ? (
-                  <AppInput
-                    placeholder="اكتب إجابتك هنا..."
-                    value={typeof answers[qi] === 'string' ? (answers[qi] as string) : ''}
-                    onChangeText={(v) => setAnswers((p) => p.map((a, ai) => (ai === qi ? v : a)))}
-                    multiline
-                    numberOfLines={4}
-                    style={{ minHeight: 100, textAlignVertical: 'top' }}
-                  />
-                ) : options.map((c, ci) => (
+
+                {/* اختياري / صح-خطأ: اختيار واحد */}
+                {qtype === 'mcq' || qtype === 'tf' ? options.map((c, ci) => (
                   <Pressable
                     key={ci}
                     onPress={() => setAnswers((p) => p.map((a, ai) => (ai === qi ? ci : a)))}
@@ -143,7 +156,84 @@ export default function StudentExamsScreen() {
                     />
                     <Text style={styles.choiceText}>{c}</Text>
                   </Pressable>
-                ))}
+                )) : null}
+
+                {/* متعدد الإجابات: علّم كل الصحيح */}
+                {qtype === 'multi' ? options.map((c, ci) => {
+                  const cur = Array.isArray(answers[qi]) ? (answers[qi] as number[]) : [];
+                  const on = cur.includes(ci);
+                  return (
+                    <Pressable
+                      key={ci}
+                      onPress={() => setAnswers((p) => p.map((a, ai) => (
+                        ai === qi ? (on ? cur.filter((x) => x !== ci) : [...cur, ci]) : a
+                      )))}
+                      style={[styles.choice, on && styles.choiceActive]}
+                    >
+                      <Ionicons
+                        name={on ? 'checkbox' : 'square-outline'}
+                        size={18}
+                        color={on ? colors.primary : colors.textMuted}
+                      />
+                      <Text style={styles.choiceText}>{c}</Text>
+                    </Pressable>
+                  );
+                }) : null}
+
+                {/* أكمل الفراغ */}
+                {qtype === 'complete' ? (
+                  <AppInput
+                    placeholder="اكتب ما ينقص العبارة..."
+                    value={typeof answers[qi] === 'string' ? (answers[qi] as string) : ''}
+                    onChangeText={(v) => setAnswers((p) => p.map((a, ai) => (ai === qi ? v : a)))}
+                  />
+                ) : null}
+
+                {/* وصل: لكل بند يسار اختر ما يقابله يميناً (ترتيب مبعثر ثابت) */}
+                {qtype === 'match' ? (() => {
+                  const pairs = q.pairs ?? [];
+                  const order = seededShuffle(pairs.length, `${taking.id}:${qi}`);
+                  const cur = Array.isArray(answers[qi]) ? (answers[qi] as number[]) : Array(pairs.length).fill(-1);
+                  return pairs.map((p, li) => (
+                    <View key={li} style={styles.matchBlock}>
+                      <Text style={styles.matchLeft}>{li + 1}) {p.l}</Text>
+                      <View style={styles.matchRights}>
+                        {order.map((ri) => (
+                          <Pressable
+                            key={ri}
+                            onPress={() => setAnswers((prev) => prev.map((a, ai) => (
+                              ai === qi ? (cur).map((v, x) => (x === li ? ri : v)) : a
+                            )))}
+                            style={[styles.matchChip, cur[li] === ri && styles.matchChipActive]}
+                          >
+                            <Text style={[styles.matchChipText, cur[li] === ri && styles.matchChipTextActive]}>
+                              {pairs[ri].r}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  ));
+                })() : null}
+
+                {/* صحّح الخطأ / مقالي / إجابة قصيرة */}
+                {qtype === 'correct' || qtype === 'essay' ? (
+                  <AppInput
+                    placeholder={qtype === 'correct' ? 'اكتب الجملة مصححة...' : 'اكتب إجابتك هنا...'}
+                    value={typeof answers[qi] === 'string' ? (answers[qi] as string) : ''}
+                    onChangeText={(v) => setAnswers((p) => p.map((a, ai) => (ai === qi ? v : a)))}
+                    multiline
+                    numberOfLines={4}
+                    style={{ minHeight: 100, textAlignVertical: 'top' }}
+                  />
+                ) : null}
+                {qtype === 'short' ? (
+                  <AppInput
+                    placeholder="إجابتك القصيرة..."
+                    value={typeof answers[qi] === 'string' ? (answers[qi] as string) : ''}
+                    onChangeText={(v) => setAnswers((p) => p.map((a, ai) => (ai === qi ? v : a)))}
+                  />
+                ) : null}
               </Card>
             );
           })}
@@ -236,7 +326,7 @@ export default function StudentExamsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
   examCard: { marginBottom: spacing.md },
   examHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
@@ -262,6 +352,19 @@ const styles = StyleSheet.create({
   },
   choiceActive: { borderColor: colors.primary, backgroundColor: colors.primary + '1f' },
   choiceText: { flex: 1, color: colors.text, fontSize: font.md, textAlign: 'right' },
+  matchBlock: {
+    backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm,
+  },
+  matchLeft: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right', marginBottom: spacing.sm },
+  matchRights: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  matchChip: {
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.full, paddingHorizontal: spacing.md, paddingVertical: 6,
+  },
+  matchChipActive: { borderColor: colors.primary, backgroundColor: colors.primary + '26' },
+  matchChipText: { color: colors.textSecondary, fontSize: font.sm, fontWeight: '700' },
+  matchChipTextActive: { color: colors.text },
   resRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
@@ -270,4 +373,4 @@ const styles = StyleSheet.create({
   resTitle: { color: colors.text, fontSize: font.md, fontWeight: '700', textAlign: 'right' },
   resMeta: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
   resScore: { fontSize: font.lg, fontWeight: '900' },
-});
+}));

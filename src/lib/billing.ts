@@ -23,7 +23,7 @@ export interface PlanProduct {
   features: string[];
 }
 
-export const TRIAL_DAYS = 7;
+export const TRIAL_DAYS = 14;
 
 export const PRODUCTS: PlanProduct[] = [
   {

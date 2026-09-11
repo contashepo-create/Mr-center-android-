@@ -12,7 +12,7 @@ import { FormMessage } from '../../src/components/pickers';
 import { devFetchPublicConfig, devSavePublicConfig } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import { arabicError } from '../../src/lib/utils';
-import { colors, font, spacing } from '../../src/theme';
+import { colors, font, spacing, themedStyles } from '../../src/theme';
 
 export default function DevAppInfoScreen() {
   const { profile, ready, refresh } = useSession();
@@ -152,9 +152,9 @@ export default function DevAppInfoScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   hint: {
     color: colors.textMuted, fontSize: font.sm, lineHeight: 22,
     marginTop: spacing.xl, textAlign: 'right',
   },
-});
+}));

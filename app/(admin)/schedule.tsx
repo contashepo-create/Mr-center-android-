@@ -9,11 +9,12 @@ import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppButton, Card, EmptyState, LoadingView, SectionTitle } from '../../src/components/controls';
 import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { fetchGroups } from '../../src/lib/api';
+import { useTeacherGroupIds } from '../../src/lib/staff';
 import { useSession } from '../../src/lib/session';
 import type { Group } from '../../src/lib/types';
 import { arabicDay, arabicError, findGroupConflicts, formatMoney, formatTimeAr, timeToMinutes, WEEK_DAYS } from '../../src/lib/utils';
 import { buildReportHtml, shareReportPdf } from '../../src/lib/report';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function ScheduleScreen() {
   const { profile } = useSession();
@@ -30,14 +31,18 @@ export default function ScheduleScreen() {
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
-  const conflicts = findGroupConflicts(groups);
+  // المدرس: جدول مجموعاته المسندة فقط (الباقي: جدول السنتر كاملاً)
+  const teacherScope = useTeacherGroupIds();
+  const scoped = teacherScope ? groups.filter((g) => teacherScope.includes(g.id)) : groups;
+
+  const conflicts = findGroupConflicts(scoped);
   const byDay = WEEK_DAYS.map((d) => ({
     day: d,
-    items: groups
+    items: scoped
       .filter((g) => (g.days ?? []).includes(d))
       .sort((a, b) => (timeToMinutes(a.start_time) ?? 9999) - (timeToMinutes(b.start_time) ?? 9999)),
   })).filter((d) => d.items.length > 0);
-  const dateless = groups.filter((g) => !(g.days ?? []).length);
+  const dateless = scoped.filter((g) => !(g.days ?? []).length);
   const priceOf = (g: Group) => {
     const b = g.billing_type ?? 'monthly';
     if (b === 'weekly') return `${formatMoney(g.weekly_price)} أسبوعياً`;
@@ -47,7 +52,7 @@ export default function ScheduleScreen() {
 
   const exportPdf = async () => {
     try {
-      const html = buildReportHtml('الجدول الأسبوعي', `${groups.length} مجموعة`,       byDay.map((d) => ({
+      const html = buildReportHtml('الجدول الأسبوعي', `${scoped.length} مجموعة`,       byDay.map((d) => ({
         title: arabicDay(d.day),
         headers: ['المجموعة', 'الموعد', 'الرسوم'],
         rows: d.items.map((g) => [
@@ -136,7 +141,7 @@ export default function ScheduleScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   conflictCard: {
     borderColor: colors.danger + '66', backgroundColor: colors.dangerBg, marginBottom: spacing.md,
   },
@@ -152,4 +157,4 @@ const styles = StyleSheet.create({
   timeText: { color: colors.text, fontSize: font.sm, fontWeight: '800' },
   slotName: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
   slotMeta: { color: colors.textSecondary, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
-});
+}));

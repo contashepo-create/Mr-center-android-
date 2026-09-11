@@ -1,0 +1,80 @@
+# ============================================================
+# الاختبار الحي E2E — يشغَّل تلقائياً مع كل push على فرع arena/*
+# يقرأ المفاتيح من Repository Secrets فقط (لا مفاتيح في الكود):
+#   E2E_SUPABASE_URL · E2E_ANON_KEY · E2E_SERVICE_KEY
+# مخرجات الاختبار تُكتب في job summary (تُقرأ عبر الـAPI)
+# لأن تنزيل اللوجات الخام محجوب عن بيئة التشغيل لدينا.
+# ============================================================
+name: E2E Live
+
+on:
+  push:
+    branches: ['arena/**']
+  workflow_dispatch: {}
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: تثبيت التبعيات
+        run: npm ci
+
+      - name: أجنحة الاختبار غير المتصلة (628 فحصاً)
+        run: npm test
+
+      - name: فحص أسرار الاتصال
+        id: keys
+        env:
+          E2E_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+        run: |
+          if [ -z "$E2E_SUPABASE_URL" ]; then
+            echo "::notice::الاختبار الحي متوقف — أضف الأسرار الثلاثة من Settings ← Secrets and variables ← Actions: E2E_SUPABASE_URL و E2E_ANON_KEY و E2E_SERVICE_KEY"
+            echo "has_keys=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_keys=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: الاختبار الحي الشامل (كل الأدوار على قاعدة حقيقية)
+        if: steps.keys.outputs.has_keys == 'true'
+        env:
+          E2E_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+          E2E_ANON_KEY: ${{ secrets.E2E_ANON_KEY }}
+          E2E_SERVICE_KEY: ${{ secrets.E2E_SERVICE_KEY }}
+        run: |
+          set -o pipefail
+          node scripts/test-e2e-live.mjs 2>&1 | tee e2e-output.log
+
+      - name: إتاحة مخرجات الاختبار (summary + annotations)
+        if: always() && steps.keys.outputs.has_keys == 'true'
+        run: |
+          if [ ! -f e2e-output.log ]; then echo "لا مخرجات" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          {
+            echo "## مخرجات الاختبار الحي E2E"
+            echo '```'
+            cat e2e-output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # الفحوص الفاشلة كأنوتيشنز (تظهر فوراً في الـAPI والواجهة)
+          grep -E "❌|💥" e2e-output.log | while IFS= read -r line; do
+            echo "::error::${line:0:240}"
+          done || true
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.keys.outputs.has_keys == 'true'
+        with:
+          name: e2e-output
+          path: e2e-output.log
+          retention-days: 3
+          if-no-files-found: ignore

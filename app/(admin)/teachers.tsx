@@ -19,7 +19,7 @@ import { isOwner, roleLabel, TEACHER_PERMS } from '../../src/lib/staff';
 import { limitsFor } from '../../src/lib/billing';
 import type { Center, Group, Profile, TeacherPermKey } from '../../src/lib/types';
 import { arabicError, formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function TeachersScreen() {
   const { profile, subscription } = useSession();
@@ -304,7 +304,7 @@ export default function TeachersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   chip: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
     borderRadius: radius.full, backgroundColor: colors.surface,
@@ -356,4 +356,4 @@ const styles = StyleSheet.create({
   permLabel: { color: colors.text, fontSize: font.md, fontWeight: '700', textAlign: 'right' },
   permHint: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
   dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
-});
+}));

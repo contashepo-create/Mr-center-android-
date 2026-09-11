@@ -16,7 +16,7 @@ import {
 import { useSession } from '../../src/lib/session';
 import type { AppSurvey, AppSurveyResponse, Student } from '../../src/lib/types';
 import { arabicError, formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function SurveysScreen() {
   const { profile } = useSession();
@@ -274,7 +274,7 @@ function MiniBtn({ icon, label, color, onPress }: {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   addBtn: {
     width: 40, height: 40, borderRadius: radius.full,
     backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
@@ -314,4 +314,4 @@ const styles = StyleSheet.create({
   respName: { color: colors.primary, fontSize: font.sm, fontWeight: '800', textAlign: 'right' },
   respQ: { color: colors.textSecondary, fontSize: font.xs, textAlign: 'right' },
   respA: { color: colors.text, fontSize: font.sm, textAlign: 'right', marginTop: 2 },
-});
+}));

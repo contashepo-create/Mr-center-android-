@@ -18,7 +18,7 @@ import {
 import { useSession } from '../../src/lib/session';
 import type { AppNotification, Grade, Group, NotificationAudience, Student } from '../../src/lib/types';
 import { arabicError, formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function NotificationsScreen() {
   const { profile } = useSession();
@@ -235,7 +235,7 @@ export default function NotificationsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   notifCard: { marginBottom: spacing.md },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   iconWrap: {
@@ -264,4 +264,4 @@ const styles = StyleSheet.create({
     color: colors.text, fontSize: font.lg, fontWeight: '900',
     textAlign: 'center', marginBottom: spacing.lg,
   },
-});
+}));

@@ -18,7 +18,7 @@ import {
 } from '../../src/lib/utils';
 import { decodeCenterQr } from '../../src/lib/qr';
 import { FormMessage, OptionPicker } from '../../src/components/pickers';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function RegisterStudentScreen() {
   const { refresh } = useSession();
@@ -54,7 +54,6 @@ export default function RegisterStudentScreen() {
         setError('كود السنتر غير صحيح — تأكد من الكود مع إدارة السنتر');
         return;
       }
-      // ملاحظة: الدالة القديمة على الخادم لا ترجع status — الغياب يُعامل كفعّال
       if (found.status && found.status !== 'active') {
         setError('هذا السنتر موقوف حالياً — تواصل مع إدارته أو إدارة التطبيق');
         return;
@@ -333,7 +332,7 @@ export default function RegisterStudentScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   stepIcon: {
     width: 64, height: 64, borderRadius: 32, alignSelf: 'center',
     backgroundColor: colors.cyan + '22', borderWidth: 1, borderColor: colors.cyan + '55',
@@ -381,4 +380,4 @@ const styles = StyleSheet.create({
   scanClose: {
     position: 'absolute', bottom: spacing.xxl, left: spacing.lg, right: spacing.lg,
   },
-});
+}));

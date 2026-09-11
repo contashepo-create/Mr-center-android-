@@ -8,8 +8,8 @@ import { nowIso, todayIso, uuid } from './utils';
 import type {
   Announcement, AppExam, AppInquiry, AppNotification, AppSurvey, AppSurveyResponse, Attendance, AttendanceStatus,
   BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, Grade,
-  Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
-  PublishedExam, SessionRecord, Student, Subscription, SubscriptionRequest, ActivityLog, TeacherPerms,
+  ExamAnswer, ExamQuestion, ExamQuestionType, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
+  PublishedExam, SessionRecord, Student, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
 } from './types';
 
 // ------------------------------------------------------------
@@ -224,10 +224,18 @@ export async function devFetchPendingRequests(): Promise<(SubscriptionRequest & 
   return rows.map((r) => ({ ...r, center_name: byId.get(r.center_id)?.name, center_code: byId.get(r.center_id)?.code }));
 }
 
-export async function devResolveRequest(id: string, centerId: string, approve: boolean): Promise<void> {
+export async function devResolveRequest(id: string, approve: boolean): Promise<void> {
   const { error } = await getSupabase().from('subscription_requests')
     .update({ status: approve ? 'approved' : 'rejected' }).eq('id', id);
   if (error) throw error;
+}
+
+/** سجل معاملات السنتر مع المطور: كل الاشتراكات المفعّلة عبر الزمن */
+export async function fetchSubscriptionsHistory(centerId: string): Promise<Subscription[]> {
+  const { data, error } = await getSupabase().from('center_subscriptions').select('*')
+    .eq('center_id', centerId).order('created_at', { ascending: false }).limit(50);
+  if (error) throw error;
+  return (data ?? []) as Subscription[];
 }
 
 /** سجل عمليات سنتر (للمالك) */
@@ -866,7 +874,7 @@ export async function fetchExams(centerId: string): Promise<AppExam[]> {
 }
 
 export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
-  title: string; questions: { q: string; type: string; choices: string[]; marks: number }[]; answers: number[];
+  title: string; questions: ExamQuestion[]; answers: ExamAnswer[];
 }): Promise<void> {
   const marksSum = exam.questions.reduce((s, q) => s + (Number(q.marks) || 1), 0);
   const total = exam.questions.length > 0
@@ -911,7 +919,7 @@ export async function fetchPublishedExams(): Promise<PublishedExam[]> {
   return (data ?? []) as PublishedExam[];
 }
 
-export async function submitExam(examId: string, answers: (number | string | null)[]): Promise<{
+export async function submitExam(examId: string, answers: ExamAnswer[]): Promise<{
   score: number; max_score: number; correct: number; total: number; status: string;
 }> {
   const { data, error } = await getSupabase().rpc('submit_exam_attempt', {
@@ -1129,6 +1137,59 @@ export async function markOwnerNoticeRead(centerId: string, notificationId: stri
   if (mine) return;
   const { error } = await getSupabase().from('app_notification_reads').insert({
     id: uuid(), center_id: centerId, notification_id: notificationId, student_id: uid,
+  });
+  if (error) throw error;
+}
+
+// ------------------------------------------------------------
+// قناة الدعم: تواصل ثنائي بين مالك السنتر والمطور
+// ------------------------------------------------------------
+
+async function myDisplayName(): Promise<string> {
+  const sb = getSupabase();
+  const { data: sess } = await sb.auth.getSession();
+  const uid = sess.session?.user.id ?? '';
+  if (!uid) return '';
+  const { data: prof } = await sb.from('profiles').select('full_name').eq('id', uid).maybeSingle();
+  return (prof as { full_name?: string } | null)?.full_name ?? '';
+}
+
+export async function fetchSupportMessages(centerId: string): Promise<SupportMessage[]> {
+  const { data, error } = await getSupabase().from('support_messages').select('*')
+    .eq('center_id', centerId)
+    .order('created_at', { ascending: true })
+    .limit(300);
+  if (error) throw error;
+  return (data ?? []) as SupportMessage[];
+}
+
+/** المالك يراسل المطور (رسائل سنتره فقط بفضل RLS) */
+export async function sendSupportMessage(centerId: string, body: string): Promise<void> {
+  const text = body.trim();
+  if (!text) throw new Error('empty_message');
+  const { error } = await getSupabase().from('support_messages').insert({
+    id: uuid(), center_id: centerId,
+    sender_role: 'owner', sender_name: await myDisplayName(), body: text,
+  });
+  if (error) throw error;
+}
+
+/** كل رسائل الدعم لكل السناتر (المطور فقط — RLS super_admin) */
+export async function devFetchSupportMessages(): Promise<SupportMessage[]> {
+  const { data, error } = await getSupabase().from('support_messages').select('*')
+    .order('created_at', { ascending: true })
+    .limit(3000);
+  if (error) throw error;
+  return (data ?? []) as SupportMessage[];
+}
+
+/** رد المطور على سنتر */
+export async function devSendSupportMessage(centerId: string, body: string): Promise<void> {
+  const text = body.trim();
+  if (!text) throw new Error('empty_message');
+  const { error } = await getSupabase().from('support_messages').insert({
+    id: uuid(), center_id: centerId,
+    sender_role: 'developer', sender_name: await myDisplayName(), body: text,
   });
   if (error) throw error;
 }

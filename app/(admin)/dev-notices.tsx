@@ -14,7 +14,7 @@ import { getSupabase } from '../../src/lib/supabase';
 import { useSession } from '../../src/lib/session';
 import type { AppNotification } from '../../src/lib/types';
 import { formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function DevNoticesScreen() {
   const { profile } = useSession();
@@ -117,7 +117,7 @@ function NoticeCard({ n, open, onOpen }: { n: AppNotification & { read: boolean 
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   card: { marginBottom: spacing.md },
   unreadCard: { borderColor: colors.warning + '66', backgroundColor: colors.warning + '11' },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
@@ -126,4 +126,4 @@ const styles = StyleSheet.create({
   date: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
   preview: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: spacing.sm, lineHeight: 20 },
   body: { color: colors.text, fontSize: font.md, textAlign: 'right', marginTop: spacing.sm, lineHeight: 26 },
-});
+}));

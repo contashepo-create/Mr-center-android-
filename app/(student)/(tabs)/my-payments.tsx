@@ -5,13 +5,13 @@
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Card, ListItem, LoadingView, SectionTitle, StatCard } from '../../src/components/controls';
-import { GradientScreen, ScreenHeader } from '../../src/components/layout';
-import { fetchDuesForStudent, fetchPaymentsForStudent } from '../../src/lib/api';
-import { useSession } from '../../src/lib/session';
-import type { Due, Payment } from '../../src/lib/types';
-import { arabicMonth, formatDate, formatMoney } from '../../src/lib/utils';
-import { colors, font, spacing } from '../../src/theme';
+import { Card, ListItem, LoadingView, SectionTitle, StatCard } from '../../../src/components/controls';
+import { GradientScreen, ScreenHeader } from '../../../src/components/layout';
+import { fetchDuesForStudent, fetchPaymentsForStudent } from '../../../src/lib/api';
+import { useSession } from '../../../src/lib/session';
+import type { Due, Payment } from '../../../src/lib/types';
+import { arabicMonth, formatDate, formatMoney } from '../../../src/lib/utils';
+import { colors, font, spacing, themedStyles } from '../../../src/theme';
 
 export default function MyPaymentsScreen() {
   const { profile } = useSession();
@@ -93,6 +93,6 @@ export default function MyPaymentsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   dim: { color: colors.textMuted, textAlign: 'center', fontSize: font.sm },
-});
+}));

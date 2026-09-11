@@ -11,17 +11,17 @@ import {
   StyleSheet, Text, View, type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, font, gradients, radius, spacing } from '../theme';
+import { colors, font, gradients, radius, spacing, themedStyles } from '../theme';
 
 /** خلفية الشاشة المتدرجة الأساسية */
 export function GradientScreen({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
   return (
     <View style={[styles.root, style]}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={colors.isDark ? 'light-content' : 'dark-content'} />
       <LinearGradient colors={gradients.screen} style={StyleSheet.absoluteFill} />
-      {/* توهج علوي زخرفي */}
+      {/* توهج نعناعي زخرفي أعلى الشاشة (تابع للوضع — لا أثر بنفسجي) */}
       <LinearGradient
-        colors={['rgba(124,58,237,0.22)', 'transparent']}
+        colors={[colors.isDark ? 'rgba(0,229,160,0.13)' : 'rgba(0,168,122,0.12)', 'transparent']}
         style={styles.glowTop}
         start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }}
       />
@@ -84,7 +84,7 @@ export function KeyboardScreen({ children }: { children: React.ReactNode }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   safe: { flex: 1 },
   glowTop: {
@@ -102,4 +102,4 @@ const styles = StyleSheet.create({
   },
   headerSub: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: 2 },
   scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl * 2 },
-});
+}));

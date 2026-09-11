@@ -5,13 +5,13 @@
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { FlatList } from 'react-native';
-import { EmptyState, ListItem, LoadingView } from '../../src/components/controls';
-import { GradientScreen, ScreenHeader } from '../../src/components/layout';
-import { fetchGradesForStudent } from '../../src/lib/api';
-import { useSession } from '../../src/lib/session';
-import type { ManualGrade } from '../../src/lib/types';
-import { arabicMonth } from '../../src/lib/utils';
-import { colors, spacing } from '../../src/theme';
+import { EmptyState, ListItem, LoadingView } from '../../../src/components/controls';
+import { GradientScreen, ScreenHeader } from '../../../src/components/layout';
+import { fetchGradesForStudent } from '../../../src/lib/api';
+import { useSession } from '../../../src/lib/session';
+import type { ManualGrade } from '../../../src/lib/types';
+import { arabicMonth } from '../../../src/lib/utils';
+import { colors, spacing } from '../../../src/theme';
 
 export default function MyGradesScreen() {
   const { profile } = useSession();

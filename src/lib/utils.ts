@@ -161,16 +161,87 @@ export function formatTimeAr(t: string | null | undefined): string {
 }
 
 /** التحقق من صلاحية أسئلة امتحان قبل الحفظ/النشر — يرد رسالة الخطأ أو null */
+/** تسميات أنواع الأسئلة الثمانية (يعرضها المعلم والطالب) */
+export const EXAM_TYPE_LABEL: Record<string, string> = {
+  mcq: 'اختياري', multi: 'متعدد الإجابات', tf: 'صح/خطأ', complete: 'أكمل',
+  match: 'وصل', correct: 'صحّح الخطأ', essay: 'مقالي', short: 'إجابة قصيرة',
+};
+
+/** الأنواع التي تُصحَّح يدوياً (قيد مراجعة المعلم) */
+export const MANUAL_EXAM_TYPES = ['essay', 'correct', 'short'] as const;
+
+/** هل السؤال يُصحَّح يدوياً؟ (النوع الغائب يُعامل mcq تلقائي) */
+export function isManualExamType(t: string | null | undefined): boolean {
+  return (MANUAL_EXAM_TYPES as readonly string[]).includes((t ?? 'mcq') as string);
+}
+
+/**
+ * تطبيع نص الإجابة للمطابقة الآلية (أكمل/صحّح):
+ * إزالة التشكيل والتطويل والترقيم، توحيد الألفات والياء والتاء المربوطة،
+ * توحيد المسافات والحالة — فيستوي «الأَمْثِلَة» و «الامثلة».
+ */
+export function normalizeAnswerText(s: string): string {
+  return (s ?? '')
+    .replace(/[\u064B-\u065F\u0670]/g, '')   // التشكيل
+    .replace(/\u0640/g, '')                    // التطويل
+    .replace(/[\u0623\u0625\u0622]/g, 'ا')  // أ إ آ → ا
+    .replace(/\u0649/g, 'ي')                   // ى → ي
+    .replace(/\u0629/g, 'ه')                   // ة → ه
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, '')        // الترقيم والرموز
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** خلط ثابت لنفس البذرة (لعرض خيارات التوصيل بترتيب مبعثر مستقر) */
+export function seededShuffle(n: number, seed: string): number[] {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  let a = (h >>> 0) || 1;
+  const next = () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const arr = Array.from({ length: Math.max(0, n) }, (_, i) => i);
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(next() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 export function validateExamDraft(qs: {
   q: string; type: string; choices: string[]; marks: number;
+  answer?: string; pairs?: { l: string; r: string }[]; corrects?: number[];
 }[]): string | null {
   if (!qs || qs.length === 0) return 'أضف سؤالاً واحداً على الأقل';
   for (let i = 0; i < qs.length; i++) {
     const n = i + 1;
-    if (!qs[i].q.trim()) return `اكتب نص السؤال رقم ${n}`;
-    if (!(Number(qs[i].marks) > 0)) return `حدد درجة صحيحة للسؤال رقم ${n}`;
-    if (qs[i].type === 'mcq' && qs[i].choices.slice(0, 4).some((c) => !c.trim())) {
+    const q = qs[i];
+    if (!q.q.trim()) return `اكتب نص السؤال رقم ${n}`;
+    if (!(Number(q.marks) > 0)) return `حدد درجة صحيحة للسؤال رقم ${n}`;
+    if ((q.type === 'mcq' || q.type === 'multi') && q.choices.slice(0, 4).some((c) => !c.trim())) {
       return `أكمل الاختيارات الأربعة للسؤال رقم ${n}`;
+    }
+    if (q.type === 'multi' && !(q.corrects ?? []).length) {
+      return `حدد إجابة واحدة صحيحة على الأقل للسؤال رقم ${n} (متعدد الإجابات)`;
+    }
+    if (q.type === 'complete' && !(q.answer ?? '').trim()) {
+      return `اكتب الإجابة النموذجية للسؤال رقم ${n} (أكمل الفراغ)`;
+    }
+    if (q.type === 'match') {
+      const pairs = q.pairs ?? [];
+      if (pairs.filter((p) => p.l.trim() && p.r.trim()).length < 2) {
+        return `أضف بندين مكتملين على الأقل للتوصيل في السؤال رقم ${n}`;
+      }
+      if (pairs.some((p) => !p.l.trim() || !p.r.trim())) {
+        return `أكمل نصوص طرفي التوصيل كاملة في السؤال رقم ${n}`;
+      }
     }
   }
   return null;
@@ -276,8 +347,12 @@ export function arabicError(err: unknown): string {
   if (msg.includes('already_registered')) return 'هذا الحساب مسجل من قبل — سجّل دخولك مباشرة';
   if (msg.includes('invalid login')) return 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
   if (msg.includes('email not confirmed')) return 'بريدك غير مؤكد بعد — افتح رابط التأكيد المرسل إلى بريدك ثم سجّل دخولك';
-  if (msg.includes('rate limit') || msg.includes('over_email_send_rate_limit') || msg.includes('too many'))
-    return 'ضغط مؤقت على إرسال البريد — انتظر دقائق ثم أعد المحاولة. (لو تكرر: فعّل SMTP خاص من لوحة Supabase)';
+  if (msg.includes('rate limit') || msg.includes('over_email_send_rate_limit')
+    || msg.includes('over_request_rate_limit') || msg.includes('over_sms_send_rate_limit')
+    || msg.includes('too many') || msg.includes('too many requests')
+    || msg.includes('for security purposes') || msg.includes('once every 60 seconds')
+    || msg.includes('once every second') || msg.includes('429'))
+    return 'ضغط مؤقت على خدمة البريد — انتظر دقيقة إلى دقيقتين ثم أعد المحاولة (رسائل التسجيل محدودة عددياً كل ساعة لمنع الإساءة)';
   if (msg.includes('user already registered') || msg.includes('already been registered'))
     return 'هذا البريد الإلكتروني مستخدم من قبل — سجّل دخولك أو استخدم بريداً آخر';
   if (msg.includes('password') && msg.includes('at least'))

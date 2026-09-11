@@ -15,37 +15,14 @@ import {
   deleteNotification, devFetchCenters, fetchNotificationReadCounts, logActivity,
   sendNotification, type CenterWithSub,
 } from '../../src/lib/api';
+import { groupBroadcasts, type BroadcastGroup } from '../../src/lib/broadcast';
 import { getSupabase } from '../../src/lib/supabase';
 import { useSession } from '../../src/lib/session';
 import type { AppNotification, NotificationAudience } from '../../src/lib/types';
 import { arabicError, formatDate } from '../../src/lib/utils';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 type Target = 'all_students' | 'all_owners' | 'one_center';
-
-interface BroadcastGroup {
-  key: string;
-  title: string;
-  body: string;
-  audience: string;
-  created_at: string;
-  centers: { id: string; name: string; reads: number; notifId: string }[];
-}
-
-function groupBroadcasts(rows: (AppNotification & { reads: number; centerName: string })[]): BroadcastGroup[] {
-  const map = new Map<string, BroadcastGroup>();
-  for (const r of rows) {
-    const key = `${r.title}\n${r.body}`;
-    let g = map.get(key);
-    if (!g) {
-      g = { key, title: r.title, body: r.body, audience: (r as { audience?: string }).audience ?? '', created_at: r.created_at, centers: [] };
-      map.set(key, g);
-    }
-    g.centers.push({ id: r.center_id, name: r.centerName, reads: r.reads, notifId: r.id });
-    if (r.created_at > g.created_at) g.created_at = r.created_at;
-  }
-  return [...map.values()].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-}
 
 export default function DevBroadcastScreen() {
   const { profile, ready } = useSession();
@@ -66,8 +43,10 @@ export default function DevBroadcastScreen() {
     try {
       const cs = await devFetchCenters();
       setCenters(cs.filter((c) => c.status === 'active'));
+      // بثوث المطور فقط (تُختم بـ «المطور: ») — لا إشعارات السناتر الداخلية
       const { data } = await getSupabase().from('app_notifications').select('*')
-        .order('created_at', { ascending: false }).limit(50);
+        .like('title', 'المطور: %')
+        .order('created_at', { ascending: false }).limit(120);
       const rows = (data ?? []) as AppNotification[];
       const readsMap = await fetchNotificationReadCounts(rows.map((n) => n.id)).catch(() => new Map());
       const withMeta = rows.map((n) => ({
@@ -253,7 +232,7 @@ export default function DevBroadcastScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   toggle: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
   toggleText: { color: colors.text, fontSize: font.md, fontWeight: '700' },
   row: { marginBottom: spacing.sm },
@@ -284,4 +263,4 @@ const styles = StyleSheet.create({
   },
   centerName: { flex: 1, color: colors.text, fontSize: font.sm, fontWeight: '700', textAlign: 'right' },
   centerReads: { color: colors.success, fontSize: font.sm, fontWeight: '800' },
-});
+}));

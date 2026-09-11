@@ -11,7 +11,7 @@ import {
   checkForUpdate, downloadAndInstall, getCurrentVersionLabel, type UpdateInfo,
 } from '../lib/updater';
 import { useSession } from '../lib/session';
-import { colors, font, gradients, radius, shadow, spacing } from '../theme';
+import { colors, font, gradients, radius, shadow, spacing, themedStyles } from '../theme';
 import { AppButton } from './controls';
 
 type Phase = 'idle' | 'prompt' | 'downloading' | 'error';
@@ -130,7 +130,7 @@ export function UpdateManager() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   backdrop: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.75)',
     alignItems: 'center', justifyContent: 'center', padding: spacing.xl,
@@ -171,4 +171,4 @@ const styles = StyleSheet.create({
     color: colors.cyan, fontSize: font.lg, fontWeight: '900',
     textAlign: 'center', marginTop: spacing.sm,
   },
-});
+}));

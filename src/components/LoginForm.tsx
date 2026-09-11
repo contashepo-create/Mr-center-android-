@@ -11,7 +11,7 @@ import { clearPendingRegistration, loadPendingRegistration } from '../lib/pendin
 import { getSupabase } from '../lib/supabase';
 import { arabicError, isValidEmail } from '../lib/utils';
 import type { Role } from '../lib/types';
-import { colors, font, spacing } from '../theme';
+import { colors, font, spacing, themedStyles } from '../theme';
 import { AppButton, AppInput } from './controls';
 import { FormMessage } from './pickers';
 
@@ -255,7 +255,7 @@ export function LoginForm({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   iconWrap: {
     width: 68, height: 68, borderRadius: 34, alignSelf: 'center',
     backgroundColor: colors.cyan + '22', borderWidth: 1, borderColor: colors.cyan + '55',
@@ -281,4 +281,4 @@ const styles = StyleSheet.create({
   },
   registerHintText: { color: colors.textSecondary, fontSize: font.md },
   registerHintLink: { color: colors.cyan, fontSize: font.md, fontWeight: '700' },
-});
+}));

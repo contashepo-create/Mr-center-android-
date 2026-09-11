@@ -7,16 +7,16 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { Card, ListItem, LoadingView, SectionTitle, StatCard } from '../../src/components/controls';
-import { GradientScreen, KeyboardScreen } from '../../src/components/layout';
+import { Card, ListItem, LoadingView, SectionTitle, StatCard } from '../../../src/components/controls';
+import { GradientScreen, KeyboardScreen } from '../../../src/components/layout';
 import {
   fetchAdminStats, fetchAnnouncements, fetchMyCenter, type AdminStats,
-} from '../../src/lib/api';
-import { useSession } from '../../src/lib/session';
-import { can, isOwner } from '../../src/lib/staff';
-import type { Announcement, Center } from '../../src/lib/types';
-import { formatMoney } from '../../src/lib/utils';
-import { colors, font, gradients, radius, spacing } from '../../src/theme';
+} from '../../../src/lib/api';
+import { useSession } from '../../../src/lib/session';
+import { can, isOwner } from '../../../src/lib/staff';
+import type { Announcement, Center } from '../../../src/lib/types';
+import { formatMoney } from '../../../src/lib/utils';
+import { colors, font, gradients, radius, spacing, themedStyles } from '../../../src/theme';
 
 export default function AdminDashboard() {
   const { profile, subscription } = useSession();
@@ -173,7 +173,7 @@ function QuickAction({ icon, label, color, onPress }: {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   heroCard: {
     borderRadius: radius.lg, padding: spacing.xl,
     flexDirection: 'row', alignItems: 'center',
@@ -201,4 +201,4 @@ const styles = StyleSheet.create({
   actionLabel: { color: colors.text, fontSize: font.xs, fontWeight: '700', textAlign: 'center' },
   moreLink: { color: colors.cyan, fontSize: font.sm, fontWeight: '700' },
   emptyText: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'center', lineHeight: 20 },
-});
+}));

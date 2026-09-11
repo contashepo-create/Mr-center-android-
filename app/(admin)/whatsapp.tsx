@@ -20,7 +20,7 @@ import {
   duesReminderText, examAlertText, generalNoticeText, guardianReportText,
   openWhatsApp, toWaNumber,
 } from '../../src/lib/whatsapp';
-import { colors, font, radius, spacing } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 type Scope = 'all' | 'grade' | 'group' | 'student';
 type Target = 'student' | 'guardian';
@@ -298,7 +298,7 @@ export default function WhatsAppScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles(() => StyleSheet.create({
   countText: { color: colors.textSecondary, fontSize: font.sm, fontWeight: '700', textAlign: 'center' },
   recCard: { marginBottom: spacing.sm, padding: spacing.md },
   recHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
@@ -310,4 +310,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
   },
   sendText: { color: '#fff', fontSize: font.sm, fontWeight: '800' },
-});
+}));
