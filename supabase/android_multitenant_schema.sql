@@ -1659,7 +1659,12 @@ DECLARE k TEXT; p TEXT; lim INT; used INT; ext INT:=0;
 BEGIN
  IF NEW.role NOT IN ('teacher','manager','secretary') OR NOT NEW.is_active THEN RETURN NEW; END IF;
  SELECT kind INTO k FROM public.centers WHERE id=NEW.center_id;
- SELECT plan_type, CASE WHEN NEW.role='teacher' THEN extra_teachers WHEN NEW.role='secretary' THEN extra_secretaries ELSE extra_managers END INTO p, ext FROM public.center_subscriptions WHERE center_id=NEW.center_id AND status='active' ORDER BY ends_on DESC LIMIT 1;
+ SELECT plan_type, CASE WHEN NEW.role='teacher' THEN extra_teachers WHEN NEW.role='secretary' THEN extra_secretaries ELSE extra_managers END INTO p, ext FROM public.center_subscriptions WHERE center_id=NEW.center_id AND status='active' AND (starts_on IS NULL OR starts_on <= CURRENT_DATE) AND (ends_on IS NULL OR ends_on >= CURRENT_DATE) ORDER BY ends_on DESC NULLS LAST LIMIT 1;
+ -- Temporary paid entitlements are additive and only count while active.
+ SELECT COALESCE(ext,0) + COALESCE(SUM(CASE WHEN NEW.role='teacher' THEN extra_teachers WHEN NEW.role='secretary' THEN extra_secretaries ELSE extra_managers END),0)
+ INTO ext FROM public.center_entitlements
+ WHERE center_id=NEW.center_id AND feature_key='staff_expansion'
+   AND starts_on <= CURRENT_DATE AND (is_open_ended OR ends_on >= CURRENT_DATE);
  IF NEW.role='manager' THEN lim=CASE WHEN k='solo' THEN 0 ELSE 1 END;
  ELSIF NEW.role='secretary' THEN lim=CASE WHEN k='solo' THEN 0 WHEN p='center_medium' THEN 1 ELSE 2 END;
  ELSE lim=CASE WHEN k='solo' THEN 0 WHEN p='center_medium' THEN 2 ELSE 4 END; END IF;
@@ -1708,3 +1713,67 @@ RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ BEGI
  IF NOT ((SELECT role='super_admin' FROM public.profiles WHERE id=auth.uid())) THEN RAISE EXCEPTION 'not_allowed'; END IF;
  INSERT INTO public.center_entitlements(center_id,extra_teachers,extra_secretaries,extra_managers,starts_on,ends_on,is_open_ended,created_by) VALUES(p_center,GREATEST(p_teachers,0),GREATEST(p_secretaries,0),GREATEST(p_managers,0),COALESCE(p_starts,CURRENT_DATE),p_ends,p_open,auth.uid()) ON CONFLICT(center_id,feature_key) DO UPDATE SET extra_teachers=EXCLUDED.extra_teachers,extra_secretaries=EXCLUDED.extra_secretaries,extra_managers=EXCLUDED.extra_managers,starts_on=EXCLUDED.starts_on,ends_on=EXCLUDED.ends_on,is_open_ended=EXCLUDED.is_open_ended,created_by=auth.uid(); END; $$;
 GRANT EXECUTE ON FUNCTION public.dev_upsert_entitlement(UUID,INT,INT,INT,DATE,DATE,BOOLEAN) TO authenticated;
+
+-- ============================================================================
+-- تطوير المحاسبة: العهدة وكشوف الرواتب والتقارير الزمنية
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.staff_custody (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(), center_id UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+ staff_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE, custody_date DATE NOT NULL DEFAULT CURRENT_DATE,
+ expected_amount NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK(expected_amount >= 0), delivered_amount NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK(delivered_amount >= 0),
+ status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','submitted','matched','shortage','surplus')), notes TEXT NOT NULL DEFAULT '',
+ submitted_at TIMESTAMPTZ, submitted_by UUID REFERENCES auth.users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(center_id,staff_id,custody_date)
+);
+ALTER TABLE public.staff_custody ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS custody_owner_all ON public.staff_custody;
+CREATE POLICY custody_owner_all ON public.staff_custody FOR ALL TO authenticated USING (public.admin_owns_center(center_id)) WITH CHECK (public.admin_owns_center(center_id));
+DROP POLICY IF EXISTS custody_staff_read ON public.staff_custody;
+CREATE POLICY custody_staff_read ON public.staff_custody FOR SELECT TO authenticated USING (staff_id=auth.uid());
+
+CREATE OR REPLACE FUNCTION public.submit_staff_custody(p_staff UUID,p_date DATE,p_delivered NUMERIC,p_notes TEXT DEFAULT '')
+RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE cid UUID; expected NUMERIC; result UUID;
+BEGIN
+ SELECT center_id INTO cid FROM public.profiles WHERE id=auth.uid() AND role IN ('manager','secretary') AND is_active;
+ IF cid IS NULL THEN RAISE EXCEPTION 'not_allowed'; END IF;
+ IF p_staff <> auth.uid() THEN RAISE EXCEPTION 'not_allowed'; END IF;
+ SELECT COALESCE(SUM(amount),0) INTO expected FROM public.center_ledger WHERE center_id=cid AND created_by=p_staff AND entry_type='payment_collection' AND occurred_on=p_date;
+ INSERT INTO public.staff_custody(center_id,staff_id,custody_date,expected_amount,delivered_amount,status,notes,submitted_at,submitted_by)
+ VALUES(cid,p_staff,p_date,expected,GREATEST(p_delivered,0),CASE WHEN p_delivered=expected THEN 'matched' WHEN p_delivered<expected THEN 'shortage' ELSE 'surplus' END,COALESCE(p_notes,''),now(),auth.uid())
+ ON CONFLICT(center_id,staff_id,custody_date) DO UPDATE SET expected_amount=EXCLUDED.expected_amount,delivered_amount=EXCLUDED.delivered_amount,status=EXCLUDED.status,notes=EXCLUDED.notes,submitted_at=now(),submitted_by=auth.uid()
+ RETURNING id INTO result; RETURN result;
+END; $$;
+GRANT EXECUTE ON FUNCTION public.submit_staff_custody(UUID,DATE,NUMERIC,TEXT) TO authenticated;
+
+-- اعتماد العهدة وتصحيح حالتها من صاحب السنتر فقط
+CREATE OR REPLACE FUNCTION public.review_staff_custody(p_id UUID, p_status TEXT, p_notes TEXT DEFAULT '')
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+ IF p_status NOT IN ('matched','shortage','surplus','open') THEN RAISE EXCEPTION 'invalid_status'; END IF;
+ UPDATE public.staff_custody SET status=p_status, notes=CASE WHEN p_notes='' THEN notes ELSE p_notes END
+ WHERE id=p_id AND public.admin_owns_center(center_id);
+ IF NOT FOUND THEN RAISE EXCEPTION 'not_found'; END IF;
+END; $$;
+GRANT EXECUTE ON FUNCTION public.review_staff_custody(UUID,TEXT,TEXT) TO authenticated;
+
+-- عمولات التحصيل: نسبة قابلة للضبط لكل موظف، ولا تغير إجمالي الإيراد
+CREATE TABLE IF NOT EXISTS public.staff_commission_rules (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(), center_id UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+ staff_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE, rate NUMERIC(5,2) NOT NULL DEFAULT 3 CHECK(rate >= 0 AND rate <= 100),
+ starts_on DATE NOT NULL DEFAULT CURRENT_DATE, ends_on DATE, is_active BOOLEAN NOT NULL DEFAULT true, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ UNIQUE(center_id, staff_id)
+);
+ALTER TABLE public.staff_commission_rules ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS commission_owner_all ON public.staff_commission_rules;
+CREATE POLICY commission_owner_all ON public.staff_commission_rules FOR ALL TO authenticated USING (public.admin_owns_center(center_id)) WITH CHECK (public.admin_owns_center(center_id));
+CREATE OR REPLACE FUNCTION public.calculate_staff_commission(p_staff UUID,p_from DATE,p_to DATE)
+RETURNS NUMERIC LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE cid UUID; rate NUMERIC; total NUMERIC;
+BEGIN
+ SELECT center_id INTO cid FROM public.profiles WHERE id=auth.uid() AND role IN ('center_admin','super_admin') AND (role='super_admin' OR center_id=(SELECT center_id FROM public.profiles WHERE id=p_staff));
+ IF cid IS NULL THEN RAISE EXCEPTION 'not_allowed'; END IF;
+ SELECT COALESCE((SELECT rate FROM public.staff_commission_rules WHERE staff_id=p_staff AND center_id=cid AND is_active AND starts_on<=p_to AND (ends_on IS NULL OR ends_on>=p_from) LIMIT 1),0) INTO rate;
+ SELECT COALESCE(SUM(amount),0) INTO total FROM public.center_ledger WHERE center_id=cid AND created_by=p_staff AND entry_type='payment_collection' AND occurred_on BETWEEN p_from AND p_to;
+ RETURN ROUND(total*rate/100,2);
+END; $$;
+GRANT EXECUTE ON FUNCTION public.calculate_staff_commission(UUID,DATE,DATE) TO authenticated;
