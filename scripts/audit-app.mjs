@@ -174,7 +174,7 @@ check('شاشة دخول مستقلة للمدرس', (() => {
 check('دخول المدرس (تسجيل + قبول دخول + تفعيل)', (() => {
   const reg = readFileSync(join(root, 'app/auth/register-teacher.tsx'), 'utf8');
   const login = readFileSync(join(root, 'src/components/LoginForm.tsx'), 'utf8');
-  return reg.includes('registerStaffAccount') && login.includes("role === 'teacher'");
+  return reg.includes('حصراً') && !reg.includes('registerStaffAccount') && login.includes("role === 'teacher'");
 })());
 check('شاشة المدرسين (تفعيل/صلاحيات/إسناد)', (() => {
   const code = readFileSync(join(root, 'app/(admin)/teachers.tsx'), 'utf8');
@@ -226,7 +226,7 @@ check('إشعارات المطور محجوبة عن المدرس', readFileSync
 check('أدوار الفريق معممة (مدير/سكرتير)', (() => {
   const staff = readFileSync(join(root, 'src/lib/rbac.ts'), 'utf8');
   return staff.includes('STAFF_ROLES') && staff.includes('manager') && staff.includes('isOwner')
-    && readFileSync(join(root, 'app/auth/register-teacher.tsx'), 'utf8').includes('registerStaffAccount');
+    && readFileSync(join(root, 'app/(admin)/teachers.tsx'), 'utf8').includes('setTeacherPerms');
 })());
 check('الباقات (منتجات + طلب ترقية للمالك + اعتماد المطور)', (() => {
   const billing = readFileSync(join(root, 'src/lib/billing.ts'), 'utf8');

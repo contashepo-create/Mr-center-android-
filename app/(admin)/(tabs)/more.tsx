@@ -145,6 +145,8 @@ export default function MoreScreen() {
         )}
         <ListItem title="واتساب السنتر" subtitle="تنبيهات وتقارير ومستحقات مباشرة" icon="logo-whatsapp" iconColor={colors.success} onPress={() => router.push('/whatsapp')} />
         <ListItem title="المدفوعات والمستحقات" subtitle="توليد الاستحقاقات الشهرية وتسجيل الدفعات" icon="wallet" iconColor={colors.cyan} onPress={() => router.push('/payments')} />
+        {isOwner(profile) ? <ListItem title="الحسابات" subtitle="إيرادات ومصروفات وقائمة مالية للسنتر" icon="calculator" iconColor={colors.success} onPress={() => router.push('/accounting')} /> : null}
+        {(isOwner(profile) || profile?.role === 'secretary' || profile?.role === 'manager') ? <ListItem title="عهدة التحصيل" subtitle="تسليم ومطابقة المبالغ المحصلة يومياً" icon="cash" iconColor={colors.warning} onPress={() => router.push('/custody')} /> : null}
         <ListItem title="الصفوف الدراسية" subtitle="إدارة الصفوف المرتبطة بالمجموعات" icon="school" iconColor={colors.info} onPress={() => router.push('/grades-list')} />
         {!isOwner(profile) ? null : (
           <>

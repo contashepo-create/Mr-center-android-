@@ -654,8 +654,12 @@ export async function recordPayment(input: {
   amount: number; month: number; year: number; notes?: string;
 }): Promise<void> {
   const sb = getSupabase();
+  const { data: authData } = await sb.auth.getUser();
+  const actorId = authData.user?.id ?? null;
+  const { data: actor } = actorId ? await sb.from('profiles').select('full_name').eq('id', actorId).maybeSingle() : { data: null };
   const { error } = await sb.from('payments').insert({
     id: uuid(), center_id: input.centerId, student_id: input.studentId,
+    collected_by: actorId, collected_by_name: actor?.full_name ?? '',
     due_id: input.dueId ?? null, amount: input.amount,
     payment_date: todayIso(), month: input.month, year: input.year,
     notes: input.notes?.trim() || null, created_at: nowIso(),

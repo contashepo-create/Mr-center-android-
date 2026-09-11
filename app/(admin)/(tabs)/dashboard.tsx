@@ -60,7 +60,7 @@ export default function AdminDashboard() {
           style={styles.heroCard}
         >
           <View style={{ flex: 1 }}>
-            <Text style={styles.hello}>مرحباً بك في لوحة السنتر</Text>
+            <Text style={styles.hello}>مرحباً {profile?.full_name ?? 'بك'} في لوحة السنتر</Text>
             <Text style={styles.centerName} numberOfLines={1}>{center?.name ?? 'سنترك'}</Text>
             <View style={styles.codePill}>
               <Ionicons name="key" size={13} color="#052E22" />
@@ -69,6 +69,12 @@ export default function AdminDashboard() {
           </View>
           <Ionicons name="school" size={58} color="rgba(4,46,34,0.3)" />
         </LinearGradient>
+
+        {/* مركز الإشعارات والرسائل — ظاهر لكل الأدوار مع احترام صلاحيات الخادم */}
+        <View style={styles.topActions}>
+          <QuickAction icon="notifications" label="الإشعارات" color={colors.warning} onPress={() => router.push('/notifications')} />
+          <QuickAction icon="chatbubbles" label="الرسائل" color={colors.cyan} onPress={() => router.push('/inquiries')} />
+        </View>
 
         {/* حالة الاشتراك — للمالك فقط */}
         {!isTeacher && subscription ? (
@@ -192,6 +198,7 @@ const styles = themedStyles(() => StyleSheet.create({
   subRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   subText: { flex: 1, color: colors.text, fontSize: font.sm, fontWeight: '700', textAlign: 'right' },
   statsRow: { flexDirection: 'row' },
+  topActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   actionsRow: { flexDirection: 'row', gap: spacing.sm },
   actionCard: { flex: 1, alignItems: 'center', paddingVertical: spacing.lg, paddingHorizontal: 4 },
   actionIcon: {
