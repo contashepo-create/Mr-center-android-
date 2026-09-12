@@ -800,19 +800,39 @@ export async function recordPayment(input: {
   const { data: authData } = await sb.auth.getUser();
   const actorId = authData.user?.id ?? null;
   const { data: actor } = actorId ? await sb.from('profiles').select('full_name').eq('id', actorId).maybeSingle() : { data: null };
-  const { error } = await sb.from('payments').insert({
-    id: uuid(), center_id: input.centerId, student_id: input.studentId,
-    collected_by: actorId, collected_by_name: actor?.full_name ?? '',
-    due_id: input.dueId ?? null, amount: input.amount,
-    payment_date: todayIso(), month: input.month, year: input.year,
-    notes: input.notes?.trim() || null, created_at: nowIso(),
-  });
-  if (error) throw error;
+
   if (input.dueId) {
-    // الدفع الجزئي يُعلَّم partial بدل paid حتى لا يضيع الباقي
-    let status = 'paid';
+    // استخدام RPC الذري للتحقق من المستحق وتخزين هوية المحصل
+    const { error } = await sb.rpc('record_payment', {
+      p_due_id: input.dueId,
+      p_amount: input.amount,
+      p_collected_by: actorId,
+      p_collected_by_name: actor?.full_name ?? '',
+    });
+    if (error) throw error;
+  } else {
+    // دفعة بدون مستحق (تسجيل يدوي)
+    const { error } = await sb.from('payments').insert({
+      id: uuid(), center_id: input.centerId, student_id: input.studentId,
+      collected_by: actorId, collected_by_name: actor?.full_name ?? '',
+      due_id: null, amount: input.amount,
+      payment_date: todayIso(), month: input.month, year: input.year,
+      notes: input.notes?.trim() || null, created_at: nowIso(),
+    });
+    if (error) throw error;
+  }
+
+  if (input.dueId) {
+    // تحديث حالة المستحق (paid/partial)
     const { data: due } = await sb.from('dues').select('amount').eq('id', input.dueId).maybeSingle();
-    if (due && Number(input.amount) < Number((due as { amount: number }).amount)) status = 'partial';
+    const { data: paidRows } = await sb.from('payments').select('amount').eq('due_id', input.dueId);
+    const totalPaid = (paidRows ?? []).reduce((s, r) => s + Number(r.amount), 0);
+    let status: string;
+    if (due && totalPaid >= Number(due.amount)) {
+      status = 'paid';
+    } else {
+      status = 'partial';
+    }
     const { error: dueErr } = await sb.from('dues').update({ status }).eq('id', input.dueId);
     if (dueErr) throw dueErr;
   }

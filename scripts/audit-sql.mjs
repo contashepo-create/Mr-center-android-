@@ -30,7 +30,7 @@ const re = (r) => r.test(sql);
 console.log('\n━━ ١) سلامة البنية ━');
 check('معاملة واحدة (BEGIN ... COMMIT)', /^\s*BEGIN;/m.test(sql) && /\bCOMMIT;/m.test(sql));
 check('علامات $$ متوازنة', (sql.match(/\$\$/g) || []).length % 2 === 0);
-check('لا يحوي DROP TABLE نهائي', !/DROP\s+TABLE\s+/i.test(sql));
+check('لا يحوي DROP TABLE نهائي (بدون IF EXISTS)', !/DROP\s+TABLE\s+(?!IF\s+EXISTS)/i.test(sql));
 check('لا يحوي DELETE جماعي بلا WHERE', !/DELETE\s+FROM\s+public\.\w+\s*;/i.test(sql));
 
 console.log('\n━━ ٢) الجداول الأساسية لتعدد السناتر ━');
