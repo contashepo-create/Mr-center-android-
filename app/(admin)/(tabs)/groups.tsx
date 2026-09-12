@@ -33,8 +33,6 @@ export default function GroupsScreen() {
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [fee, setFee] = useState('');
-  const [teacherName, setTeacherName] = useState('');
-  const [teacherPhone, setTeacherPhone] = useState('');
   const [billing, setBilling] = useState<BillingType>('monthly');
   const [weeklyPrice, setWeeklyPrice] = useState('');
   const [sessionPrice, setSessionPrice] = useState('');
@@ -66,7 +64,6 @@ export default function GroupsScreen() {
   const openAdd = () => {
     setEditing(null); setName(''); setGradeId(null); setDays([]);
     setStartTime(''); setEndTime(''); setFee('');
-    setTeacherName(''); setTeacherPhone('');
     setBilling('monthly'); setWeeklyPrice(''); setSessionPrice('');
     setFormError(null);
     setFormOpen(true);
@@ -81,7 +78,6 @@ export default function GroupsScreen() {
   const openEdit = (g: Group) => {
     setEditing(g); setName(g.name); setGradeId(g.grade_id);
     setDays(g.days ?? []); setStartTime(to24(g.start_time)); setEndTime(to24(g.end_time));
-    setTeacherName(g.teacher_name ?? ''); setTeacherPhone(g.teacher_phone ?? '');
     setFee(g.monthly_fee ? String(g.monthly_fee) : '');
     setBilling(g.billing_type ?? 'monthly');
     setWeeklyPrice(g.weekly_price ? String(g.weekly_price) : '');
@@ -107,8 +103,9 @@ export default function GroupsScreen() {
       await upsertGroup(centerId, {
         id: editing?.id,
         name,
-        teacher_name: teacherName,
-        teacher_phone: teacherPhone,
+        // المدرس يُعيَّن حصراً من شاشة فريق العمل (إسناد مجموعات) — لا اختيار من هنا
+        teacher_name: editing?.teacher_name ?? '',
+        teacher_phone: editing?.teacher_phone ?? '',
         grade_id: gradeId,
         days,
         start_time: startTime.trim(),
@@ -204,14 +201,7 @@ export default function GroupsScreen() {
             <Text style={styles.modalTitle}>{editing ? 'تعديل المجموعة' : 'إنشاء مجموعة جديدة'}</Text>
             <ScrollView showsVerticalScrollIndicator={false}>
             <AppInput label="اسم المجموعة" icon="albums" placeholder="مثال: مجموعة السبت والثلاثاء" value={name} onChangeText={setName} />
-            <View style={{ flexDirection: 'row', gap: spacing.md }}>
-              <View style={{ flex: 1 }}>
-                <AppInput label="مدرس المجموعة (اختياري)" icon="person" placeholder="مثال: مستر أحمد" value={teacherName} onChangeText={setTeacherName} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <AppInput label="هاتف المدرس" icon="call" placeholder="01xxxxxxxxx" value={teacherPhone} onChangeText={setTeacherPhone} keyboardType="phone-pad" textAlign="left" style={{ writingDirection: 'ltr' }} />
-              </View>
-            </View>
+            <Text style={styles.teacherHint}>المدرس يُعيَّن للمجموعة من شاشة «فريق العمل» بعد تفعيل الحساب وإسناد المجموعات له.</Text>
             <OptionPicker
               label="الصف الدراسي (اختياري)"
               icon="school"
@@ -383,4 +373,5 @@ const styles = themedStyles(() => StyleSheet.create({
     color: colors.text, fontSize: font.lg, fontWeight: '900',
     textAlign: 'center', marginBottom: spacing.lg,
   },
+  teacherHint: { color: colors.info, fontSize: font.xs, textAlign: 'right', marginBottom: spacing.md, lineHeight: 18 },
 }));

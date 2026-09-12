@@ -5,12 +5,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { AppButton, Card, EmptyState, LoadingView, SectionTitle } from '../../src/components/controls';
 import { DeveloperGate } from '../../src/components/DeveloperGate';
 import { BackHeader, GradientScreen } from '../../src/components/layout';
 import {
-  devSetCenterStatus, fetchActivityLog, fetchMyCenter, logActivity,
+  devSetAccountingFeature, devSetCenterStatus, fetchAccountingEnabled, fetchActivityLog, fetchMyCenter, logActivity,
 } from '../../src/lib/api';
 import { openWhatsApp } from '../../src/lib/whatsapp';
 import { useSession } from '../../src/lib/session';
@@ -30,19 +30,21 @@ export default function CenterDetailScreen() {
   const [studentsSample, setStudentsSample] = useState<Student[]>([]);
   const [subs, setSubs] = useState<Subscription[]>([]);
   const [activity, setActivity] = useState<ActivityLog[]>([]);
+  const [accountingOn, setAccountingOn] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     if (!id) return;
     try {
       const sb = getSupabase();
-      const [c, profs, stCount, stSample, subRows, act] = await Promise.all([
+      const [c, profs, stCount, stSample, subRows, act, acc] = await Promise.all([
         fetchMyCenter(id),
         sb.from('profiles').select('*').eq('center_id', id).order('created_at', { ascending: false }).limit(200),
         sb.from('students').select('id', { count: 'exact', head: true }).eq('center_id', id),
         sb.from('students').select('id,name,phone,status,created_at').eq('center_id', id).order('created_at', { ascending: false }).limit(15),
         sb.from('center_subscriptions').select('*').eq('center_id', id).order('ends_on', { ascending: false }).limit(10),
         fetchActivityLog(id),
+        fetchAccountingEnabled(id),
       ]);
       if (c) setCenter(c);
       setStaff(((profs.data ?? []) as Profile[]).filter((p) => p.role !== 'student'));
@@ -50,6 +52,7 @@ export default function CenterDetailScreen() {
       setStudentsSample((stSample.data ?? []) as Student[]);
       setSubs((subRows.data ?? []) as Subscription[]);
       setActivity(act.slice(0, 20));
+      setAccountingOn(acc);
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
@@ -167,6 +170,46 @@ export default function CenterDetailScreen() {
             </View>
           ))}
 
+          <SectionTitle title="خدمات مدفوعة إضافية" />
+          <Card>
+            <View style={styles.featureRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.personName}>قسم الحسابات</Text>
+                <Text style={styles.personMeta}>
+                  {accountingOn ? 'مفعّل لهذا السنتر — يجد المالك تحصيله كاملاً منذ البداية'
+                    : 'مغلق — دفتر الحسابات مخفي عن المالك (الإيرادات تُسجل بالخلفية)'}
+                </Text>
+              </View>
+              <Switch
+                value={accountingOn}
+                onValueChange={(v) => {
+                  Alert.alert(
+                    v ? 'تفعيل قسم الحسابات' : 'تعطيل قسم الحسابات',
+                    v ? 'سيصبح دفتر الحسابات ظاهراً لصاحب السنتر فوراً بما فيه سجل التحصيل السابق.'
+                      : 'سيختفي الدفتر عن المالك مع بقاء الإيرادات مسجلة في الخلفية.',
+                    [
+                      { text: 'إلغاء', style: 'cancel' },
+                      {
+                        text: v ? 'تفعيل' : 'تعطيل', style: v ? 'default' : 'destructive',
+                        onPress: async () => {
+                          setAccountingOn(v);
+                          try {
+                            await devSetAccountingFeature(id, v);
+                            await logActivity(id, 'accounting_feature', v ? 'تفعيل قسم الحسابات' : 'تعطيل قسم الحسابات');
+                          } catch (e) {
+                            setAccountingOn(!v);
+                            Alert.alert('تعذر التطبيق', arabicError(e));
+                          }
+                        },
+                      },
+                    ]);
+                }}
+                trackColor={{ false: colors.surfaceAlt, true: colors.primary }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+          </Card>
+
           <SectionTitle title="أحدث العمليات" />
           {activity.length === 0 ? (
             <Card><Text style={styles.dimText}>لا عمليات مسجلة</Text></Card>
@@ -196,6 +239,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 const styles = themedStyles(() => StyleSheet.create({
   hero: { borderWidth: 1 },
+  featureRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   heroRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   heroName: { color: colors.text, fontSize: font.xl, fontWeight: '900', textAlign: 'right' },
   heroMeta: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'right', marginTop: 2 },

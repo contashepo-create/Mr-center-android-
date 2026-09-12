@@ -108,7 +108,7 @@ export interface Due {
   student_id: string;
   group_id: string | null;
   month: number;
-  year: number;
+  due_year: number;
   amount: number;
   status: 'pending' | 'paid' | 'partial';
   created_at: string;
@@ -122,7 +122,7 @@ export interface Payment {
   amount: number;
   payment_date: string;
   month: number;
-  year: number;
+  payment_year: number;
   notes: string | null;
   created_at: string;
 }
@@ -161,7 +161,7 @@ export interface ManualGrade {
   score: number;
   max_score: number;
   month: number;
-  year: number;
+  grade_year: number;
   notes: string | null;
   created_at: string;
 }
@@ -186,6 +186,32 @@ export interface Subscription {
   ends_on: string;
   status: SubscriptionStatus;
   notes: string | null;
+  created_at: string;
+  extra_teachers?: number;
+  extra_secretaries?: number;
+  extra_managers?: number;
+  enabled_features?: Record<string, boolean>;
+}
+
+export interface FiscalYear {
+  id: string;
+  center_id: string;
+  fiscal_year: number;
+  status: 'open' | 'closed';
+  opening_balance: number;
+  closing_balance: number | null;
+  opened_at: string;
+  closed_at: string | null;
+}
+
+export interface StaffInvite {
+  id: string;
+  center_id: string;
+  code: string;
+  name: string;
+  phone: string | null;
+  role: 'teacher' | 'secretary';
+  status: 'pending' | 'accepted' | 'revoked';
   created_at: string;
 }
 

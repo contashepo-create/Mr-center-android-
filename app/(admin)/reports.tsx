@@ -239,7 +239,7 @@ export default function ReportsScreen() {
       sections.push({
         title: 'الدرجات اليدوية',
         headers: ['التقييم', 'الدرجة', 'الشهر'],
-        rows: grades.map((g) => [g.title, `${g.score}/${g.max_score}`, `${arabicMonth(g.month)} ${g.year}`]),
+        rows: grades.map((g) => [g.title, `${g.score}/${g.max_score}`, `${arabicMonth(g.month)} ${g.grade_year}`]),
       });
       sections.push({
         title: 'الامتحانات الإلكترونية',
@@ -260,7 +260,7 @@ export default function ReportsScreen() {
       sections.push({
         title: 'كشف الحساب (مستحقات)',
         headers: ['الفترة', 'المبلغ', 'الحالة'],
-        rows: dues.map((d) => [`${arabicMonth(d.month)} ${d.year}`, formatMoney(d.amount), dueStatus(d)]),
+        rows: dues.map((d) => [`${arabicMonth(d.month)} ${d.due_year}`, formatMoney(d.amount), dueStatus(d)]),
       });
       sections.push({
         title: 'سجل الدفعات',

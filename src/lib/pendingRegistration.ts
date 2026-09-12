@@ -32,10 +32,7 @@ export interface PendingStudentRegistration {
 export interface PendingTeacherRegistration {
   kind: 'teacher';
   email: string;
-  centerId: string;
-  fullName: string;
-  phone: string;
-  staffRole?: string;
+  inviteCode: string;
 }
 
 export type PendingRegistration = PendingCenterRegistration | PendingStudentRegistration | PendingTeacherRegistration;
