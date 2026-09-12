@@ -190,9 +190,9 @@ try {
   eq('خصوصي سنتان 5000', billing.priceFor('solo_teacher', 24), 5000);
   {
     const full = billing.limitsFor('center', 'center_full');
-    ok('حدود الشاملة (1/2/4)', full.managers === 1 && full.secretaries === 2 && full.teachers === 4 && full.maxStudents === null);
+    ok('حدود الشاملة (بلا مدير/2/4)', full.managers === 0 && full.secretaries === 2 && full.teachers === 4 && full.maxStudents === null);
     const med = billing.limitsFor('center', 'center_medium');
-    ok('حدود المتوسطة (1/1/2)', med.managers === 1 && med.secretaries === 1 && med.teachers === 2);
+    ok('حدود المتوسطة (0/1/2 — بلا مدير)', med.managers === 0 && med.secretaries === 1 && med.teachers === 2);
     const solo = billing.limitsFor('solo', 'solo_teacher');
     ok('حدود المنفرد (0/0/0 + 200 طالب)', solo.managers === 0 && solo.teachers === 0 && solo.maxStudents === 200);
     const trial = billing.limitsFor('center', 'trial');

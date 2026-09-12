@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
-import { completePendingCenter, completePendingStudent, loginWithEmail, registerStaffAccount, sendPasswordReset } from '../lib/api';
+import { acceptStaffInvite, completePendingCenter, completePendingStudent, loginWithEmail, registerStaffAccount, sendPasswordReset } from '../lib/api';
 import { clearPendingRegistration, loadPendingRegistration } from '../lib/pendingRegistration';
 import { getSupabase } from '../lib/supabase';
 import { arabicError, isValidEmail } from '../lib/utils';
@@ -80,10 +80,18 @@ export function LoginForm({
                 gradeId: pending.gradeId ?? null, groupId: pending.groupId ?? null,
               });
             } else {
-              await registerStaffAccount({
-                centerId: pending.centerId, fullName: pending.fullName, phone: pending.phone,
-                role: pending.staffRole ?? 'teacher',
-              });
+              // موظف بدعوة: كود الدعوة يحدد السنتر والدور، والحساب يبقى خاملاً حتى التفعيل
+              const inviteCode = (pending as { inviteCode?: string }).inviteCode ?? '';
+              if (inviteCode) {
+                await acceptStaffInvite(inviteCode);
+              } else {
+                await registerStaffAccount({
+                  centerId: (pending as { centerId?: string }).centerId ?? '',
+                  fullName: (pending as { fullName?: string }).fullName ?? '',
+                  phone: (pending as { phone?: string }).phone ?? '',
+                  role: (pending as { staffRole?: string }).staffRole ?? 'teacher',
+                });
+              }
             }
             await clearPendingRegistration();
             const retry = await getSupabase()

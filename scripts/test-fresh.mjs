@@ -59,7 +59,7 @@ console.log('\n━━ الباقات الاحترافية (متطلبات الم
   eq('شامل: شهري 600', full.durations.find((d) => d.months === 1)?.price, 600);
   eq('شامل: سنوي 6500', full.durations.find((d) => d.months === 12)?.price, 6500);
   eq('شامل: سنتان 12000', full.durations.find((d) => d.months === 24)?.price, 12000);
-  eq('شامل: مدير 1', full.managers, 1);
+  eq('شامل: بلا مدير (المالك هو المدير)', full.managers, 0);
   eq('شامل: سكرتير 2', full.secretaries, 2);
   eq('شامل: مدرسون 4', full.teachers, 4);
   eq('شامل: طلاب غير محدود', full.maxStudents, null);
@@ -67,7 +67,7 @@ console.log('\n━━ الباقات الاحترافية (متطلبات الم
   eq('متوسط: شهري 400', med.durations.find((d) => d.months === 1)?.price, 400);
   eq('متوسط: سنوي 4500', med.durations.find((d) => d.months === 12)?.price, 4500);
   eq('متوسط: سنتان 8500', med.durations.find((d) => d.months === 24)?.price, 8500);
-  eq('متوسط: مدير 1 · سكرتير 1 · مدرس 2', [med.managers, med.secretaries, med.teachers], [1, 1, 2]);
+  eq('متوسط: بلا مدير · سكرتير 1 · مدرس 2', [med.managers, med.secretaries, med.teachers], [0, 1, 2]);
   eq('متوسط: طلاب غير محدود', med.maxStudents, null);
 
   eq('خصوصي: شهري 300', solo.durations.find((d) => d.months === 1)?.price, 300);
@@ -78,8 +78,8 @@ console.log('\n━━ الباقات الاحترافية (متطلبات الم
 
   eq('التجريبية 14 يوماً', billing.TRIAL_DAYS, 14);
   const trialLimits = billing.limitsFor('center', 'trial');
-  eq('التجريبية = مميزات الشامل كاملة (1/2/4 وبلا حد طلاب)',
-    [trialLimits.managers, trialLimits.secretaries, trialLimits.teachers, trialLimits.maxStudents], [1, 2, 4, null]);
+  eq('التجريبية = مميزات الشامل كاملة (بلا مدير/2 سكرتير/4 مدرسين وبلا حد طلاب)',
+    [trialLimits.managers, trialLimits.secretaries, trialLimits.teachers, trialLimits.maxStudents], [0, 2, 4, null]);
   const soloLimits = billing.limitsFor('solo', 'center_full');
   eq('الحساب المنفرد دائماً بلا فريق و200 طالب (ولو كانت الخطة شاملة)',
     [soloLimits.managers, soloLimits.secretaries, soloLimits.teachers, soloLimits.maxStudents], [0, 0, 0, 200]);

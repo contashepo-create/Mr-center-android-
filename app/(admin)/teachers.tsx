@@ -7,17 +7,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { AppButton, Card, EmptyState, LoadingView, SectionTitle, NoAccess } from '../../src/components/controls';
+import * as Clipboard from 'expo-clipboard';
+import { AppButton, AppInput, Card, EmptyState, LoadingView, SectionTitle, NoAccess } from '../../src/components/controls';
 import { BackHeader, GradientScreen } from '../../src/components/layout';
-import { FormMessage } from '../../src/components/pickers';
+import { FormMessage, OptionPicker } from '../../src/components/pickers';
 import {
-  assignTeacherGroups, deleteTeacher, fetchGroups, fetchMyCenter, fetchStaff, fetchTeacherGroups,
-  logActivity, setTeacherActive, setTeacherPerms,
+  assignTeacherGroups, createStaffInvite, deleteTeacher, devListInvites, fetchGroups, fetchMyCenter, fetchStaff, fetchTeacherGroups,
+  logActivity, revokeStaffInvite, setTeacherActive, setTeacherPerms,
 } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import { isOwner, roleLabel, TEACHER_PERMS } from '../../src/lib/staff';
 import { limitsFor } from '../../src/lib/billing';
-import type { Center, Group, Profile, TeacherPermKey } from '../../src/lib/types';
+import type { Center, Group, Profile, StaffInvite, TeacherPermKey } from '../../src/lib/types';
 import { arabicError, formatDate } from '../../src/lib/utils';
 import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
@@ -37,13 +38,23 @@ export default function TeachersScreen() {
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // دعوة موظف جديد (سكرتير/مدرس فقط — المدير هو صاحب السنتر ولا يُدعى)
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [invName, setInvName] = useState('');
+  const [invPhone, setInvPhone] = useState('');
+  const [invRole, setInvRole] = useState<'secretary' | 'teacher'>('secretary');
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [invites, setInvites] = useState<StaffInvite[]>([]);
+  const [invBusy, setInvBusy] = useState(false);
+
   const load = useCallback(async () => {
     if (!centerId) return;
     try {
-      const [c, t, g] = await Promise.all([
+      const [c, t, g, inv] = await Promise.all([
         fetchMyCenter(centerId), fetchStaff(centerId), fetchGroups(centerId),
+        devListInvites(centerId).catch(() => []),
       ]);
-      setCenter(c); setTeachers(t); setGroups(g);
+      setCenter(c); setTeachers(t); setGroups(g); setInvites(inv);
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
@@ -143,6 +154,31 @@ export default function TeachersScreen() {
 
   const activePerms = (t: Profile) => TEACHER_PERMS.filter(({ key }) => (t.perms as Record<string, boolean>)?.[key]);
 
+  const createInvite = async () => {
+    if (!invName.trim()) { Alert.alert('بيانات ناقصة', 'أدخل اسم الموظف'); return; }
+    setInvBusy(true);
+    try {
+      const code = await createStaffInvite({ centerId, name: invName, phone: invPhone, role: invRole });
+      setInviteCode(code);
+      await logActivity(centerId, 'staff_invite_created', `${invName} (${roleLabel(invRole)}) — كود دعوة`);
+      await load();
+    } catch (e) {
+      Alert.alert('تعذر إنشاء الدعوة', arabicError(e));
+    } finally { setInvBusy(false); }
+  };
+
+  const copyInvite = async (code: string) => {
+    try { await Clipboard.setStringAsync(code); Alert.alert('تم النسخ', `كود الدعوة: ${code}`); }
+    catch { Alert.alert('كود الدعوة', code); }
+  };
+
+  const revokeInvite = (inv: StaffInvite) => {
+    Alert.alert('سحب الدعوة', `إلغاء كود دعوة «${inv.name}»؟ لن يعمل الكود بعد الآن.`, [
+      { text: 'إلغاء', style: 'cancel' },
+      { text: 'سحب', style: 'destructive', onPress: async () => { try { await revokeStaffInvite(inv.id); await load(); } catch (e) { Alert.alert('تعذر السحب', arabicError(e)); } } },
+    ]);
+  };
+
   const counts = (r: string) => teachers.filter((t) => t.role === r && t.is_active).length;
   const limits = limitsFor(center?.kind, subscription?.plan_type);
   const limitText = (used: number, max: number, label: string) => `${label}: ${used}/${max}`;
@@ -151,7 +187,7 @@ export default function TeachersScreen() {
     <GradientScreen>
       <BackHeader
         title="فريق العمل"
-        subtitle={`مدير ${counts('manager')}/${limits.managers} · سكرتير ${counts('secretary')}/${limits.secretaries} · مدرس ${counts('teacher')}/${limits.teachers}`}
+        subtitle={`المدير هو صاحب السنتر · سكرتير ${counts('secretary')}/${limits.secretaries} · مدرس ${counts('teacher')}/${limits.teachers}`}
       />
       {loading ? (
         <LoadingView message="جاري التحميل..." />
@@ -168,7 +204,6 @@ export default function TeachersScreen() {
               {([
                 { v: 'all', label: `الكل (${teachers.length})` },
                 { v: 'teacher', label: `مدرس (${counts('teacher')})` },
-                { v: 'manager', label: `مدير (${counts('manager')})` },
                 { v: 'secretary', label: `سكرتير (${counts('secretary')})` },
               ]).map((f) => (
                 <Pressable
@@ -181,11 +216,14 @@ export default function TeachersScreen() {
               ))}
             </ScrollView>
           </View>
+          <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.md }}>
+            <AppButton title="دعوة موظف (سكرتير/مدرس)" icon="person-add" variant="outline" onPress={() => { setInviteCode(null); setInvName(''); setInvPhone(''); setInvRole('secretary'); setInviteOpen(true); }} />
+          </View>
           {shown.length === 0 ? (
             <EmptyState
               icon="briefcase-outline"
               title="لا يوجد أفراد بعد"
-              message="شارك كود سنترك مع فريقك ليسجلوا من «انضمام لفريق سنتر»، ثم فعّلهم من هنا وحدد صلاحياتهم ومجموعاتهم"
+              message="اضغط «دعوة موظف» لتوليد كود دعوة وأرسله لسكرتير أو مدرس ليسجل به حسابه، ثم فعّله من هنا وحدد صلاحياته ومجموعاته"
             />
           ) : (
             <FlatList
@@ -240,8 +278,59 @@ export default function TeachersScreen() {
           )}
         />
           )}
+          {invites.filter((i) => i.status === 'pending').length > 0 ? (
+            <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.xl }}>
+              <SectionTitle title="دعوات بانتظار التسجيل" />
+              {invites.filter((i) => i.status === 'pending').map((inv) => (
+                <Card key={inv.id} style={{ marginBottom: spacing.sm }}>
+                  <View style={styles.nameRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.tName}>{inv.name} — {roleLabel(inv.role)}</Text>
+                      <Text style={styles.tMeta}>الكود: {inv.code} · بانتظار التسجيل بالكود</Text>
+                    </View>
+                    <Pressable onPress={() => copyInvite(inv.code)} style={styles.actionBtn}><Ionicons name="copy" size={14} color={colors.cyan} /><Text style={[styles.actionText, { color: colors.cyan }]}>نسخ</Text></Pressable>
+                    <Pressable onPress={() => revokeInvite(inv)} style={styles.actionBtn}><Ionicons name="close-circle" size={14} color={colors.danger} /><Text style={[styles.actionText, { color: colors.danger }]}>سحب</Text></Pressable>
+                  </View>
+                </Card>
+              ))}
+            </View>
+          ) : null}
         </>
       )}
+
+      <Modal visible={inviteOpen} transparent animationType="slide" onRequestClose={() => setInviteOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalTitle}>دعوة موظف جديد</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.permHint}>حد الباقة يُفرض تلقائياً (سكرتير/مدرس). المدير هو صاحب السنتر ولا يُضاف مدير إضافي.</Text>
+              <AppInput label="اسم الموظف" value={invName} onChangeText={setInvName} placeholder="الاسم الكامل" />
+              <AppInput label="رقم الهاتف (اختياري)" value={invPhone} onChangeText={setInvPhone} keyboardType="phone-pad" />
+              <OptionPicker
+                label="الدور"
+                value={invRole}
+                options={[{ value: 'secretary', label: 'سكرتير' }, { value: 'teacher', label: 'مدرس' }]}
+                onChange={(v) => setInvRole(v as 'secretary' | 'teacher')}
+              />
+              {inviteCode ? (
+                <Card>
+                  <Text style={styles.modalTitle}>كود الدعوة</Text>
+                  <Text style={{ color: colors.primary, fontSize: 30, fontWeight: '900', textAlign: 'center', letterSpacing: 3 }}>{inviteCode}</Text>
+                  <Text style={styles.permHint}>أرسل الكود للموظف ليمرر من «دخول فريق العمل ← سجّل بالكود» مع بريده وكلمة مرور. يبقى حسابه خاملاً حتى تفعّله من هنا.</Text>
+                  <AppButton title="نسخ الكود" icon="copy" variant="outline" small onPress={() => copyInvite(inviteCode)} />
+                  <View style={{ height: spacing.sm }} />
+                  <AppButton title="تم" icon="checkmark" small onPress={async () => { setInviteOpen(false); await load(); }} loading={invBusy} />
+                </Card>
+              ) : (
+                <AppButton title="توليد كود الدعوة" icon="key" onPress={createInvite} loading={invBusy} />
+              )}
+              <View style={{ height: spacing.md }} />
+              <AppButton title="إغلاق" variant="ghost" small onPress={() => setInviteOpen(false)} />
+              <View style={{ height: spacing.xl }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={manageOpen} transparent animationType="slide" onRequestClose={() => setManageOpen(false)}>
         <View style={styles.modalBackdrop}>

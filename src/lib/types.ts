@@ -187,6 +187,32 @@ export interface Subscription {
   status: SubscriptionStatus;
   notes: string | null;
   created_at: string;
+  extra_teachers?: number;
+  extra_secretaries?: number;
+  extra_managers?: number;
+  enabled_features?: Record<string, boolean>;
+}
+
+export interface FiscalYear {
+  id: string;
+  center_id: string;
+  year: number;
+  status: 'open' | 'closed';
+  opening_balance: number;
+  closing_balance: number | null;
+  opened_at: string;
+  closed_at: string | null;
+}
+
+export interface StaffInvite {
+  id: string;
+  center_id: string;
+  code: string;
+  name: string;
+  phone: string | null;
+  role: 'teacher' | 'secretary';
+  status: 'pending' | 'accepted' | 'revoked';
+  created_at: string;
 }
 
 export interface CenterLookup {

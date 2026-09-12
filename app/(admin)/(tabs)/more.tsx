@@ -13,7 +13,7 @@ import * as Sharing from 'expo-sharing';
 import { AppButton, Card, ListItem, SectionTitle } from '../../../src/components/controls';
 import { ThemeToggleRow } from '../../../src/components/ThemeToggle';
 import { GradientScreen, KeyboardScreen } from '../../../src/components/layout';
-import { fetchMyCenter } from '../../../src/lib/api';
+import { fetchAccountingEnabled, fetchMyCenter } from '../../../src/lib/api';
 import { isOwner } from '../../../src/lib/staff';
 import { useSession } from '../../../src/lib/session';
 import { encodeCenterQr } from '../../../src/lib/qr';
@@ -24,11 +24,15 @@ import { colors, font, gradients, radius, spacing, themedStyles } from '../../..
 export default function MoreScreen() {
   const { profile, signOut } = useSession();
   const [center, setCenter] = useState<Center | null>(null);
+  const [accountingEnabled, setAccountingEnabled] = useState(false);
   const qrRef = useRef<{ toDataURL: (cb: (data: string) => void) => void } | null>(null);
 
   useEffect(() => {
     if (profile?.center_id) {
       fetchMyCenter(profile.center_id).then(setCenter).catch(() => {});
+      if (isOwner(profile)) {
+        fetchAccountingEnabled(profile.center_id).then(setAccountingEnabled).catch(() => {});
+      }
     }
   }, [profile?.center_id]);
 
@@ -145,8 +149,8 @@ export default function MoreScreen() {
         )}
         <ListItem title="واتساب السنتر" subtitle="تنبيهات وتقارير ومستحقات مباشرة" icon="logo-whatsapp" iconColor={colors.success} onPress={() => router.push('/whatsapp')} />
         <ListItem title="المدفوعات والمستحقات" subtitle="توليد الاستحقاقات الشهرية وتسجيل الدفعات" icon="wallet" iconColor={colors.cyan} onPress={() => router.push('/payments')} />
-        {isOwner(profile) ? <ListItem title="الحسابات" subtitle="إيرادات ومصروفات وقائمة مالية للسنتر" icon="calculator" iconColor={colors.success} onPress={() => router.push('/accounting')} /> : null}
-        {(isOwner(profile) || profile?.role === 'secretary' || profile?.role === 'manager') ? <ListItem title="عهدة التحصيل" subtitle="تسليم ومطابقة المبالغ المحصلة يومياً" icon="cash" iconColor={colors.warning} onPress={() => router.push('/custody')} /> : null}
+        {isOwner(profile) ? (accountingEnabled ? <ListItem title="الحسابات" subtitle="إيرادات ومصروفات وقائمة مالية للسنتر" icon="calculator" iconColor={colors.success} onPress={() => router.push('/accounting')} /> : <ListItem title="الحسابات (خدمة مدفوعة)" subtitle="اعرف مزاياها واطلب تفعيلها" icon="lock-closed" iconColor={colors.warning} onPress={() => router.push('/accounting')} />) : null}
+        {(isOwner(profile) ? accountingEnabled : (profile?.role === 'secretary' || profile?.role === 'manager')) ? <ListItem title="عهدة التحصيل" subtitle="تسليم ومطابقة المبالغ المحصلة يومياً" icon="cash" iconColor={colors.warning} onPress={() => router.push('/custody')} /> : null}
         <ListItem title="الصفوف الدراسية" subtitle="إدارة الصفوف المرتبطة بالمجموعات" icon="school" iconColor={colors.info} onPress={() => router.push('/grades-list')} />
         {!isOwner(profile) ? null : (
           <>

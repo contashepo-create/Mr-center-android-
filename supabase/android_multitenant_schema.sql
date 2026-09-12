@@ -1213,6 +1213,105 @@ $$;
 GRANT EXECUTE ON FUNCTION public.get_my_notifications() TO authenticated;
 
 -- ============================================================================
+-- دعوات فريق العمل: المالك ينشئ الدعوة (مدرس/سكرتير فقط — بلا مدير)،
+-- وصاحب الدعوة يقبلها بكودها فينشأ حسابه خاملاً حتى التفعيل.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.staff_invites (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id   UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  code        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL DEFAULT '',
+  phone       TEXT,
+  role        TEXT NOT NULL DEFAULT 'teacher' CHECK (role IN ('teacher','secretary')),
+  perms       JSONB NOT NULL DEFAULT '{}',
+  group_ids   JSONB NOT NULL DEFAULT '[]',
+  status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','revoked')),
+  accepted_by UUID,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_invites_center ON public.staff_invites(center_id);
+CREATE INDEX IF NOT EXISTS idx_staff_invites_code ON public.staff_invites(code);
+
+ALTER TABLE public.staff_invites ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "staff_invites_owner_all" ON public.staff_invites;
+CREATE POLICY "staff_invites_owner_all" ON public.staff_invites FOR ALL TO authenticated
+  USING (public.my_role() = 'center_admin' AND center_id = public.my_center_id())
+  WITH CHECK (public.my_role() = 'center_admin' AND center_id = public.my_center_id()
+              AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS "staff_invites_super_admin" ON public.staff_invites;
+CREATE POLICY "staff_invites_super_admin" ON public.staff_invites FOR ALL TO authenticated
+  USING (public.my_role() = 'super_admin') WITH CHECK (public.my_role() = 'super_admin');
+DROP POLICY IF EXISTS "staff_invites_legacy" ON public.staff_invites;
+CREATE POLICY "staff_invites_legacy" ON public.staff_invites FOR ALL TO authenticated
+  USING (public.is_legacy_admin()) WITH CHECK (public.is_legacy_admin());
+
+-- بيانات دعوة للعرض قبل التسجيل (اسم السنتر والصفة فقط — بلا بيانات حساسة)
+CREATE OR REPLACE FUNCTION public.get_invite_info(p_code TEXT)
+RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_inv public.staff_invites%ROWTYPE;
+  v_center TEXT;
+  v_status TEXT;
+BEGIN
+  SELECT * INTO v_inv FROM public.staff_invites
+   WHERE upper(code) = upper(trim(p_code)) LIMIT 1;
+  IF v_inv.id IS NULL THEN RETURN jsonb_build_object('found', false); END IF;
+  SELECT name, status INTO v_center, v_status FROM public.centers WHERE id = v_inv.center_id;
+  IF v_status IS DISTINCT FROM 'active' THEN
+    RETURN jsonb_build_object('found', true, 'suspended', true);
+  END IF;
+  RETURN jsonb_build_object(
+    'found', true, 'center_id', v_inv.center_id, 'center_name', v_center,
+    'role', v_inv.role, 'name', v_inv.name,
+    'usable', (v_inv.status = 'pending')
+  );
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.get_invite_info(TEXT) TO anon, authenticated;
+
+-- قبول الدعوة: ينشئ حساب الفريق خاملاً ويربط مجموعاته ويغلق الدعوة
+CREATE OR REPLACE FUNCTION public.accept_staff_invite(p_code TEXT)
+RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+  v_email TEXT;
+  v_inv public.staff_invites%ROWTYPE;
+  v_status TEXT;
+  g TEXT;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_uid) THEN
+    RAISE EXCEPTION 'already_registered';
+  END IF;
+  SELECT * INTO v_inv FROM public.staff_invites
+   WHERE upper(code) = upper(trim(p_code)) LIMIT 1;
+  IF v_inv.id IS NULL THEN RAISE EXCEPTION 'invalid_invite'; END IF;
+  IF v_inv.status <> 'pending' THEN RAISE EXCEPTION 'invite_used'; END IF;
+  SELECT status INTO v_status FROM public.centers WHERE id = v_inv.center_id;
+  IF v_status IS NULL THEN RAISE EXCEPTION 'center_not_found'; END IF;
+  IF v_status <> 'active' THEN RAISE EXCEPTION 'center_suspended'; END IF;
+  SELECT email INTO v_email FROM auth.users WHERE id = v_uid;
+  BEGIN
+    INSERT INTO public.profiles (id, role, center_id, full_name, email, phone, is_active, perms)
+    VALUES (v_uid, v_inv.role, v_inv.center_id, nullif(trim(v_inv.name), ''), v_email,
+            nullif(trim(COALESCE(v_inv.phone, '')), ''), false, COALESCE(v_inv.perms, '{}'));
+  EXCEPTION WHEN unique_violation THEN
+    RAISE EXCEPTION 'phone_taken';
+  END;
+  FOR g IN SELECT jsonb_array_elements_text(COALESCE(v_inv.group_ids, '[]'::jsonb)) LOOP
+    INSERT INTO public.teacher_groups (teacher_id, group_id, center_id)
+    SELECT v_uid::text, g, v_inv.center_id
+    WHERE EXISTS (SELECT 1 FROM public.groups WHERE id = g AND center_id = v_inv.center_id)
+    ON CONFLICT DO NOTHING;
+  END LOOP;
+  UPDATE public.staff_invites SET status = 'accepted', accepted_by = v_uid WHERE id = v_inv.id;
+  RETURN v_uid;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.accept_staff_invite(TEXT) TO authenticated;
+
+-- ============================================================================
 -- ٦/هـ) قناة الدعم: رسائل ثنائية بين مالك السنتر والمطور
 -- (المالك يقرأ ويرسل لسنتره فقط — المطور يرى الكل ويرد)
 -- ============================================================================
@@ -1331,7 +1430,8 @@ BEGIN
   SELECT plan_type INTO v_plan FROM public.center_subscriptions
    WHERE center_id = NEW.center_id ORDER BY ends_on DESC LIMIT 1;
   IF NEW.role = 'manager' THEN
-    IF v_kind = 'solo' THEN v_max := 0; ELSE v_max := 1; END IF;
+    -- لا مدير إضافي أبداً: المالك هو المدير الوحيد
+    v_max := 0;
   ELSIF NEW.role = 'secretary' THEN
     IF v_kind = 'solo' THEN v_max := 0;
     ELSIF v_plan = 'center_medium' THEN v_max := 1;
@@ -1665,7 +1765,7 @@ BEGIN
  INTO ext FROM public.center_entitlements
  WHERE center_id=NEW.center_id AND feature_key='staff_expansion'
    AND starts_on <= CURRENT_DATE AND (is_open_ended OR ends_on >= CURRENT_DATE);
- IF NEW.role='manager' THEN lim=CASE WHEN k='solo' THEN 0 ELSE 1 END;
+ IF NEW.role='manager' THEN lim=0; -- صاحب السنتر هو المدير الوحيد — زيادة المديرين من المطور فقط
  ELSIF NEW.role='secretary' THEN lim=CASE WHEN k='solo' THEN 0 WHEN p='center_medium' THEN 1 ELSE 2 END;
  ELSE lim=CASE WHEN k='solo' THEN 0 WHEN p='center_medium' THEN 2 ELSE 4 END; END IF;
  SELECT count(*) INTO used FROM public.profiles WHERE center_id=NEW.center_id AND role=NEW.role AND is_active AND id IS DISTINCT FROM NEW.id;
@@ -1777,3 +1877,196 @@ BEGIN
  RETURN ROUND(total*rate/100,2);
 END; $$;
 GRANT EXECUTE ON FUNCTION public.calculate_staff_commission(UUID,DATE,DATE) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.calculate_staff_commission(UUID,DATE,DATE) TO authenticated;
+
+-- ============================================================================
+-- ١٠) المحاسبة كخدمة مدفوعة: تفعيل لكل سنتر من لوحة المطور + السنوات المالية
+--     - دون التفعيل: الإيرادات تُسجل بالخلفية آلياً (trigger بأمان تعريف)
+--       ويراها المطور فقط؛ المالك لا يرى دفتر الحسابات ولا يدخل فيه.
+--     - عند التفعيل لاحقاً: يجد المالك سجل التحصيل كاملاً منذ بداية اشتراكه.
+-- ============================================================================
+
+-- هل المحاسبة مفعّلة لهذا السنتر؟ (المطور دائماً · اشتراك فعّال بميزة accounting · صلاحية مؤقتة)
+CREATE OR REPLACE FUNCTION public.accounting_enabled(p_center UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+  v_role TEXT;
+  v_feat BOOLEAN := false;
+BEGIN
+  IF v_uid IS NULL THEN RETURN false; END IF;
+  SELECT role INTO v_role FROM public.profiles WHERE id = v_uid;
+  IF v_role = 'super_admin' THEN RETURN true; END IF;
+  SELECT COALESCE((s.enabled_features ->> 'accounting')::boolean, false) INTO v_feat
+    FROM public.center_subscriptions s
+   WHERE s.center_id = p_center AND s.status = 'active'
+     AND (s.starts_on IS NULL OR s.starts_on <= CURRENT_DATE)
+     AND (s.ends_on IS NULL OR s.ends_on >= CURRENT_DATE)
+   ORDER BY s.ends_on DESC NULLS LAST LIMIT 1;
+  IF v_feat THEN RETURN true; END IF;
+  RETURN EXISTS (
+    SELECT 1 FROM public.center_entitlements e
+     WHERE e.center_id = p_center AND e.feature_key = 'accounting'
+       AND e.starts_on <= CURRENT_DATE
+       AND (e.is_open_ended OR e.ends_on >= CURRENT_DATE));
+END; $$;
+GRANT EXECUTE ON FUNCTION public.accounting_enabled(UUID) TO authenticated;
+
+-- مالك السنتر لا يلمس الدفتر إلا إذا كانت الخدمة مفعّلة له (خادمياً)
+DROP POLICY IF EXISTS ledger_owner_all ON public.center_ledger;
+CREATE POLICY ledger_owner_all ON public.center_ledger FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id));
+
+  WITH CHECK (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id));
+
+-- السنوات المالية: فتح/إغلاق مع ترحيل الرصيد
+CREATE TABLE IF NOT EXISTS public.center_fiscal_years (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  year INT NOT NULL CHECK (year BETWEEN 2000 AND 2100),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
+  opening_balance NUMERIC(12,2) NOT NULL DEFAULT 0,
+  closing_balance NUMERIC(12,2),
+  opened_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  closed_at TIMESTAMPTZ,
+  closed_by UUID REFERENCES auth.users(id),
+  UNIQUE (center_id, year)
+);
+CREATE INDEX IF NOT EXISTS idx_fiscal_center_year ON public.center_fiscal_years(center_id, year DESC);
+ALTER TABLE public.center_fiscal_years ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS fiscal_owner_all ON public.center_fiscal_years;
+CREATE POLICY fiscal_owner_all ON public.center_fiscal_years FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id));
+DROP POLICY IF EXISTS fiscal_dev_all ON public.center_fiscal_years;
+CREATE POLICY fiscal_dev_all ON public.center_fiscal_years FOR ALL TO authenticated
+  USING ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid()))
+  WITH CHECK ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid()));
+
+-- فتح سنة مالية: رصيد أول المدة = رصيد إغلاق آخر سنة مغلقة قبله
+CREATE OR REPLACE FUNCTION public.open_fiscal_year(p_year INT)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  cid UUID;
+BEGIN
+  SELECT center_id INTO cid FROM public.profiles
+   WHERE id = auth.uid()
+     AND (role = 'super_admin'
+          OR (role = 'center_admin' AND public.accounting_enabled(center_id)));
+  IF cid IS NULL THEN RAISE EXCEPTION 'not_allowed'; END IF;
+  IF EXISTS (SELECT 1 FROM public.center_fiscal_years WHERE center_id = cid AND year = p_year) THEN
+    RAISE EXCEPTION 'year_exists';
+  END IF;
+  INSERT INTO public.center_fiscal_years(center_id, year, status, opening_balance)
+  VALUES (cid, p_year, 'open',
+    COALESCE((SELECT closing_balance FROM public.center_fiscal_years
+               WHERE center_id = cid AND status = 'closed' AND year < p_year
+               ORDER BY year DESC LIMIT 1), 0));
+END; $$;
+GRANT EXECUTE ON FUNCTION public.open_fiscal_year(INT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.open_fiscal_year(INT) TO authenticated;
+
+-- إغلاق سنة: حساب الصافي + فتح السنة التالية بترحيل الرصيد تلقائياً
+CREATE OR REPLACE FUNCTION public.close_fiscal_year(p_year INT)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  cid UUID;
+  v_net NUMERIC;
+  v_row public.center_fiscal_years%ROWTYPE;
+BEGIN
+  SELECT center_id INTO cid FROM public.profiles
+   WHERE id = auth.uid()
+     AND (role = 'super_admin'
+          OR (role = 'center_admin' AND public.accounting_enabled(center_id)));
+  IF cid IS NULL THEN RAISE EXCEPTION 'not_allowed'; END IF;
+  SELECT * INTO v_row FROM public.center_fiscal_years WHERE center_id = cid AND year = p_year;
+  IF NOT FOUND THEN RAISE EXCEPTION 'year_not_found'; END IF;
+  IF v_row.status <> 'open' THEN RAISE EXCEPTION 'year_closed'; END IF;
+  SELECT COALESCE(SUM(CASE kind WHEN 'income' THEN amount ELSE -amount END), 0) INTO v_net
+    FROM public.center_ledger
+   WHERE center_id = cid
+     AND COALESCE(period_year, EXTRACT(YEAR FROM occurred_on)::int) = p_year;
+  UPDATE public.center_fiscal_years
+     SET status = 'closed', closing_balance = v_net, closed_at = now(), closed_by = auth.uid()
+   WHERE id = v_row.id;
+  -- السنة التالية تُفتح تلقائياً برصيد مرحّل (وإن كانت موجودة يُحدَّث رصيد أول المدة)
+  INSERT INTO public.center_fiscal_years(center_id, year, status, opening_balance)
+  VALUES (cid, p_year + 1, 'open', v_net)
+  ON CONFLICT (center_id, year) DO UPDATE SET opening_balance = EXCLUDED.opening_balance;
+END; $$;
+GRANT EXECUTE ON FUNCTION public.close_fiscal_year(INT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.close_fiscal_year(INT) TO authenticated;
+
+-- ============================================================================
+-- ١١) دعوات فريق العمل: صاحب السنتر يولّد كود دعوة (سكرتير/مدرس فقط —
+--     المدير لا يُدعى إطلاقاً؛ صاحب السنتر هو المدير) والموظف يسجل بالكود.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.staff_invites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  phone TEXT,
+  role TEXT NOT NULL CHECK (role IN ('teacher','secretary')),
+  perms JSONB NOT NULL DEFAULT '{}'::jsonb,
+  group_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','revoked')),
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_invites_center ON public.staff_invites(center_id, created_at DESC);
+ALTER TABLE public.staff_invites ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS invites_owner_all ON public.staff_invites;
+CREATE POLICY invites_owner_all ON public.staff_invites FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS invites_dev_all ON public.staff_invites;
+CREATE POLICY invites_dev_all ON public.staff_invites FOR ALL TO authenticated
+  USING ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid()))
+  WITH CHECK ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid()));
+
+-- معاينة كود الدعوة (قبل التسجيل — للموظف والزائر)
+CREATE OR REPLACE FUNCTION public.get_invite_info(p_code TEXT)
+RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v RECORD;
+BEGIN
+  SELECT i.role AS invite_role, i.name AS invite_name, c.id AS center_id,
+         c.name AS center_name, c.status AS center_status, i.status AS invite_status
+    INTO v FROM public.staff_invites i JOIN public.centers c ON c.id = i.center_id
+   WHERE i.code = upper(trim(p_code));
+  IF NOT FOUND THEN RETURN jsonb_build_object('found', false); END IF;
+  RETURN jsonb_build_object(
+    'found', true,
+    'suspended', v.center_status <> 'active',
+    'usable', v.center_status = 'active' AND v.invite_status = 'pending',
+    'center_id', v.center_id, 'center_name', v.center_name,
+    'role', v.invite_role, 'name', v.invite_name);
+END; $$;
+GRANT EXECUTE ON FUNCTION public.get_invite_info(TEXT) TO anon, authenticated;
+
+-- قبول الدعوة: حساب جديد بلا ملف → ملف فريق خامل (بانتظار تفعيل صاحب السنتر)
+CREATE OR REPLACE FUNCTION public.accept_staff_invite(p_code TEXT)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+  v_email TEXT;
+  v RECORD;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_uid) THEN
+    RAISE EXCEPTION 'already_registered';
+  END IF;
+  SELECT * INTO v FROM public.staff_invites WHERE code = upper(trim(p_code)) FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'invite_not_found'; END IF;
+  IF v.status <> 'pending' THEN RAISE EXCEPTION 'invite_unusable'; END IF;
+  SELECT email INTO v_email FROM auth.users WHERE id = v_uid;
+  IF v_email IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+  IF (SELECT status FROM public.centers WHERE id = v.center_id) <> 'active' THEN
+    RAISE EXCEPTION 'center_suspended';
+  END IF;
+  INSERT INTO public.profiles (id, role, center_id, full_name, email, phone, is_active, perms)
+  VALUES (v_uid, v.role, v.center_id, v.name, v_email, v.phone, false, v.perms);
+  UPDATE public.staff_invites SET status = 'accepted' WHERE id = v.id;
+END; $$;
+GRANT EXECUTE ON FUNCTION public.accept_staff_invite(TEXT) TO authenticated;

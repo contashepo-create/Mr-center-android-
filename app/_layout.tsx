@@ -77,7 +77,7 @@ function RouterGuard() {
     } else if (isOwner(profile) || isStaff(profile)) {
       const allowed = ['dashboard', 'students', 'groups', 'attendance', 'more', 'payments',
         'announcements', 'grades-list', 'admin-settings', 'student', 'about', 'scan',
-        'exams', 'inquiries', 'surveys', 'library', 'schedule', 'reports', 'guide', 'whatsapp', 'notifications', 'dev-notices', 'teachers', 'subscription', 'activity', 'support', 'accounting'];
+        'exams', 'inquiries', 'surveys', 'library', 'schedule', 'reports', 'guide', 'whatsapp', 'notifications', 'dev-notices', 'teachers', 'subscription', 'activity', 'support', 'accounting', 'custody'];
       if (!root || root === 'index' || inAuth || inDev || !allowed.includes(root)) {
         router.replace('/dashboard');
       }
@@ -127,12 +127,16 @@ export default function RootLayout() {
 }
 
 function AppShell() {
-  useTheme();
+  const { mode } = useTheme();
   return (
+    // بلا مفتاح: الجلسة تبقى حية، والشجرة تُعاد رسمها عبر سياق الثيم فتتبدل الألوان فوراً
+    // بلا إعادة تشغيل أو إعادة تحميل (الأنماط الحية themedStyles تتبع الوضع تلقائياً).
     <SessionProvider>
       <RouterGuard />
     </SessionProvider>
   );
+  // mode مُستهلك عمداً كي يعاد رسم AppShell عند التبديل
+  void mode;
 }
 
 const styles = themedStyles(() => StyleSheet.create({

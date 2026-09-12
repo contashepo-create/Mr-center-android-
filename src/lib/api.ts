@@ -7,7 +7,7 @@ import { getSupabase } from './supabase';
 import { nowIso, todayIso, uuid } from './utils';
 import type {
   Announcement, AppExam, AppInquiry, AppNotification, AppSurvey, AppSurveyResponse, Attendance, AttendanceStatus,
-  BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, Grade,
+  BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, FiscalYear, Grade, StaffInvite,
   ExamAnswer, ExamQuestion, ExamQuestionType, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
   PublishedExam, SessionRecord, Student, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
 } from './types';
@@ -270,6 +270,149 @@ export async function setTeacherActive(id: string, active: boolean): Promise<voi
 export async function setTeacherPerms(id: string, perms: TeacherPerms): Promise<void> {
   const { error } = await getSupabase().from('profiles').update({ perms }).eq('id', id);
   if (error) throw error;
+}
+
+/** توليد كود دعوة (6 خانات بلا حروف ملتبسة) */
+export function generateInviteCode(): string {
+  const ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let out = '';
+  const rnd = new Uint32Array(6);
+  crypto.getRandomValues(rnd);
+  for (let i = 0; i < 6; i++) out += ABC[rnd[i] % ABC.length];
+  return out;
+}
+
+export async function createStaffInvite(input: {
+  centerId: string; name: string; phone: string; role: string;
+}): Promise<string> {
+  const sb = getSupabase();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateInviteCode();
+    const { error } = await sb.from('staff_invites').insert({
+      center_id: input.centerId, code, name: input.name.trim(),
+      phone: input.phone.trim() || null, role: input.role,
+      perms: {}, group_ids: [],
+    });
+    if (!error) return code;
+    if (!String((error as { message?: string }).message ?? '').includes('duplicate key')) throw error;
+  }
+  throw new Error('تعذر توليد كود فريد — حاول مجدداً');
+}
+
+export async function fetchStaffInvites(centerId: string): Promise<StaffInvite[]> {
+  const { data, error } = await getSupabase().from('staff_invites').select('*')
+    .eq('center_id', centerId).order('created_at', { ascending: false }).limit(100);
+  if (error) throw error;
+  return (data ?? []) as StaffInvite[];
+}
+
+export async function revokeStaffInvite(id: string): Promise<void> {
+  const { error } = await getSupabase().from('staff_invites')
+    .update({ status: 'revoked' }).eq('id', id);
+  if (error) throw error;
+}
+
+export async function getInviteInfo(code: string): Promise<{
+  found: boolean; suspended?: boolean; usable?: boolean;
+  center_id?: string; center_name?: string; role?: string; name?: string;
+}> {
+  const { data, error } = await getSupabase().rpc('get_invite_info', { p_code: code.trim().toUpperCase() });
+  if (error) throw error;
+  return (data ?? { found: false }) as {
+    found: boolean; suspended?: boolean; usable?: boolean;
+    center_id?: string; center_name?: string; role?: string; name?: string;
+  };
+}
+
+export async function acceptStaffInvite(code: string): Promise<void> {
+  const { error } = await getSupabase().rpc('accept_staff_invite', { p_code: code.trim().toUpperCase() });
+  if (error) throw error;
+}
+
+/** تسجيل موظف بدعوة — يرجع true إذا اكتمل الملف فوراً وfalse إذا علّق لتأكيد البريد */
+export async function registerStaffByInvite(input: {
+  inviteCode: string; email: string; password: string;
+}): Promise<boolean> {
+  const sb = getSupabase();
+  const email = input.email.trim().toLowerCase();
+  const { data, error } = await sb.auth.signUp({ email, password: input.password });
+  if (error) throw error;
+  if (!data.user) throw new Error('email_taken');
+  try {
+    await ensureSessionAfterSignUp(email, input.password);
+  } catch (e) {
+    if ((e as Error).message === 'email_confirmation_required') return false; // معلق حتى التأكيد
+    throw e;
+  }
+  try {
+    await acceptStaffInvite(input.inviteCode);
+  } catch (e) {
+    const m = String((e as any)?.message ?? '').toLowerCase();
+    if (m.includes('already_registered')) return true; // الملف اتعمل فعلاً
+    throw e;
+  }
+  return true;
+}
+
+// ------------------------------------------------------------
+// المحاسبة كخدمة مدفوعة + السنوات المالية
+// ------------------------------------------------------------
+
+/** هل المحاسبة مفعّلة لهذا السنتر من المطور؟ (خادمياً) */
+export async function fetchAccountingEnabled(centerId: string): Promise<boolean> {
+  try {
+    const { data, error } = await getSupabase().rpc('accounting_enabled', { p_center: centerId });
+    if (error) return false;
+    return data === true;
+  } catch {
+    return false;
+  }
+}
+
+/** (المطور) تفعيل/تعطيل المحاسبة لسنتر معين — يحفظ باقي الزيادات والمزايا */
+export async function devSetAccountingFeature(centerId: string, enabled: boolean): Promise<void> {
+  const sb = getSupabase();
+  const { data: sub } = await sb.from('center_subscriptions').select('*')
+    .eq('center_id', centerId).eq('status', 'active').maybeSingle();
+  const s = (sub ?? {}) as {
+    extra_teachers?: number; extra_secretaries?: number; extra_managers?: number;
+    enabled_features?: Record<string, boolean>;
+  };
+  const features = { ...(s.enabled_features ?? {}), accounting: enabled };
+  const { error } = await sb.rpc('dev_set_entitlements', {
+    p_center: centerId,
+    p_teachers: s.extra_teachers ?? 0,
+    p_secretaries: s.extra_secretaries ?? 0,
+    p_managers: s.extra_managers ?? 0,
+    p_features: features,
+  });
+  if (error) throw error;
+}
+
+/** سنوات السنتر المالية (تُعرض للمالك عند تفعيل المحاسبة فقط) */
+export async function fetchFiscalYears(centerId: string): Promise<FiscalYear[]> {
+  const { data, error } = await getSupabase().from('center_fiscal_years').select('*')
+    .eq('center_id', centerId).order('year', { ascending: false }).limit(30);
+  if (error) throw error;
+  return (data ?? []) as FiscalYear[];
+}
+
+export async function openFiscalYear(year: number): Promise<void> {
+  const { error } = await getSupabase().rpc('open_fiscal_year', { p_year: year });
+  if (error) throw error;
+}
+
+export async function closeFiscalYear(year: number): Promise<void> {
+  const { error } = await getSupabase().rpc('close_fiscal_year', { p_year: year });
+  if (error) throw error;
+}
+
+/** (المطور) دعوات فريق العمل — للعرض والسحب في شاشة الفريق */
+export async function devListInvites(centerId: string): Promise<StaffInvite[]> {
+  const { data, error } = await getSupabase().from('staff_invites').select('id,center_id,code,name,phone,role,status,created_at')
+    .eq('center_id', centerId).order('created_at', { ascending: false }).limit(30);
+  if (error) throw error;
+  return (data ?? []) as StaffInvite[];
 }
 
 export async function deleteTeacher(id: string): Promise<void> {
