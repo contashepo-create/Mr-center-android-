@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // ملف الطالب لدى مسئول السنتر: بيانات + مجموعة + درجات + دفعات
 // ============================================================
 
@@ -134,7 +134,7 @@ export default function StudentFileScreen() {
         dueId: payDueId,
         amount,
         month: due?.month ?? now.getMonth() + 1,
-        year: due?.year ?? now.getFullYear(),
+        year: due?.due_year ?? now.getFullYear(),
         notes: payNotes,
       });
       setPayOpen(false);
@@ -245,7 +245,7 @@ export default function StudentFileScreen() {
           {
             title: 'الدرجات اليدوية',
             headers: ['التقييم', 'الدرجة', 'الشهر'],
-            rows: grades.map((g) => [g.title, `${g.score}/${g.max_score}`, `${arabicMonth(g.month)} ${g.year}`]),
+            rows: grades.map((g) => [g.title, `${g.score}/${g.max_score}`, `${arabicMonth(g.month)} ${g.grade_year}`]),
           },
           {
             title: 'الامتحانات الإلكترونية',
@@ -259,7 +259,7 @@ export default function StudentFileScreen() {
           {
             title: 'كشف الحساب (مستحقات)',
             headers: ['الفترة', 'المبلغ', 'الحالة'],
-            rows: dues.map((d) => [`${arabicMonth(d.month)} ${d.year}`, formatMoney(d.amount), dueStatus(d)]),
+            rows: dues.map((d) => [`${arabicMonth(d.month)} ${d.due_year}`, formatMoney(d.amount), dueStatus(d)]),
           },
           {
             title: 'سجل الدفعات',
@@ -453,7 +453,7 @@ export default function StudentFileScreen() {
         ) : pendingDues.map((d) => (
           <ListItem
             key={d.id}
-            title={`${arabicMonth(d.month)} ${d.year}`}
+            title={`${arabicMonth(d.month)} ${d.due_year}`}
             subtitle={formatMoney(d.amount)}
             icon="time"
             iconColor={colors.warning}
@@ -472,7 +472,7 @@ export default function StudentFileScreen() {
           <ListItem
             key={g.id}
             title={g.title}
-            subtitle={`${arabicMonth(g.month)} ${g.year}`}
+            subtitle={`${arabicMonth(g.month)} ${g.grade_year}`}
             icon="star"
             iconColor={colors.warning}
             badge={{
@@ -529,7 +529,7 @@ export default function StudentFileScreen() {
           <ListItem
             key={p.id}
             title={formatMoney(p.amount)}
-            subtitle={`${arabicMonth(p.month)} ${p.year} · ${formatDate(p.payment_date)}`}
+            subtitle={`${arabicMonth(p.month)} ${p.payment_year} · ${formatDate(p.payment_date)}`}
             icon="cash"
             iconColor={colors.success}
           />
@@ -550,7 +550,7 @@ export default function StudentFileScreen() {
               value={payDueId}
               options={pendingDues.map((d) => ({
                 value: d.id,
-                label: `${arabicMonth(d.month)} ${d.year}`,
+                label: `${arabicMonth(d.month)} ${d.due_year}`,
                 subtitle: formatMoney(d.amount),
               }))}
               onChange={(v) => {

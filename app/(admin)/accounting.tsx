@@ -41,10 +41,10 @@ export default function Accounting(){
   years.map((fy)=>(
    <View key={fy.id} style={styles.yearRow}>
      <View style={{flex:1}}>
-       <Text style={styles.yearTitle}>{fy.year} — {fy.status==='open'?'مفتوحة':'مغلقة'}</Text>
+       <Text style={styles.yearTitle}>{fy.fiscal_year} — {fy.status==='open'?'مفتوحة':'مغلقة'}</Text>
        <Text style={styles.meta}>أول المدة: {Number(fy.opening_balance).toFixed(2)} ج{fy.status==='closed'&&fy.closing_balance!=null?` · الإغلاق: ${Number(fy.closing_balance).toFixed(2)} ج`:''}</Text>
      </View>
-     {fy.status==='open'?<AppButton title="إغلاق السنة وترحيل الرصيد" icon="lock-closed" small variant="danger" onPress={()=>closeYear(fy.year)}/>:null}
+     {fy.status==='open'?<AppButton title="إغلاق السنة وترحيل الرصيد" icon="lock-closed" small variant="danger" onPress={()=>closeYear(fy.fiscal_year)}/>:null}
    </View>))}
  <View style={styles.filters}><AppInput label="سنة جديدة (مثال 2026)" value={newYear} onChangeText={setNewYear} keyboardType="number-pad"/><AppButton title="فتح سنة" icon="add-circle-outline" onPress={openYear}/></View>
  <Text style={styles.hint}>عند إغلاق سنة يُرحَّل الصافي تلقائياً كرصيد أول مدة للسنة التالية وتُفتح تلقائياً.</Text>

@@ -144,7 +144,7 @@ export default function WhatsAppScreen() {
       const first = mine[0];
       return duesReminderText(
         center?.name ?? '', s.name,
-        `${arabicMonth(first.month)} ${first.year}`, duesTotal(s.id),
+        `${arabicMonth(first.month)} ${first.due_year}`, duesTotal(s.id),
       );
     }
     if (tpl === 'report') {

@@ -62,7 +62,7 @@ export default function MyPaymentsScreen() {
             pending.map((d) => (
               <ListItem
                 key={d.id}
-                title={`${arabicMonth(d.month)} ${d.year}`}
+                title={`${arabicMonth(d.month)} ${d.due_year}`}
                 subtitle={formatMoney(d.amount)}
                 icon="time"
                 iconColor={colors.warning}
@@ -81,7 +81,7 @@ export default function MyPaymentsScreen() {
               <ListItem
                 key={p.id}
                 title={formatMoney(p.amount)}
-                subtitle={`${arabicMonth(p.month)} ${p.year} · ${formatDate(p.payment_date)}`}
+                subtitle={`${arabicMonth(p.month)} ${p.payment_year} · ${formatDate(p.payment_date)}`}
                 icon="checkmark-circle"
                 iconColor={colors.success}
               />

@@ -61,7 +61,7 @@ export default function MyGradesScreen() {
             return (
               <ListItem
                 title={item.title}
-                subtitle={`${arabicMonth(item.month)} ${item.year}`}
+                subtitle={`${arabicMonth(item.month)} ${item.grade_year}`}
                 icon="star"
                 iconColor={color}
                 badge={{ text: `${item.score}/${item.max_score}`, color, bg }}

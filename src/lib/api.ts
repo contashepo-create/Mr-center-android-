@@ -392,7 +392,7 @@ export async function devSetAccountingFeature(centerId: string, enabled: boolean
 /** سنوات السنتر المالية (تُعرض للمالك عند تفعيل المحاسبة فقط) */
 export async function fetchFiscalYears(centerId: string): Promise<FiscalYear[]> {
   const { data, error } = await getSupabase().from('center_fiscal_years').select('*')
-    .eq('center_id', centerId).order('year', { ascending: false }).limit(30);
+    .eq('center_id', centerId).order('fiscal_year', { ascending: false }).limit(30);
   if (error) throw error;
   return (data ?? []) as FiscalYear[];
 }
@@ -675,7 +675,7 @@ export async function saveAttendance(
 
 export async function fetchDues(centerId: string, month: number, year: number): Promise<Due[]> {
   const { data, error } = await getSupabase().from('dues').select('*')
-    .eq('center_id', centerId).eq('month', month).eq('year', year);
+    .eq('center_id', centerId).eq('month', month).eq('due_year', year);
   if (error) throw error;
   return (data ?? []) as Due[];
 }
@@ -765,7 +765,7 @@ export async function fetchAllPendingDues(centerId: string): Promise<Due[]> {
 /** مدفوعات شهر معين (للتقارير) */
 export async function fetchPaymentsForMonth(centerId: string, month: number, year: number): Promise<Payment[]> {
   const { data, error } = await getSupabase().from('payments').select('*')
-    .eq('center_id', centerId).eq('month', month).eq('year', year).order('payment_date', { ascending: false }).limit(500);
+    .eq('center_id', centerId).eq('month', month).eq('payment_year', year).order('payment_date', { ascending: false }).limit(500);
   if (error) throw error;
   return (data ?? []) as Payment[];
 }
@@ -773,7 +773,7 @@ export async function fetchPaymentsForMonth(centerId: string, month: number, yea
 /** درجات يدوية لشهر معين (للتقارير) */
 export async function fetchManualGradesForMonth(centerId: string, month: number, year: number): Promise<ManualGrade[]> {
   const { data, error } = await getSupabase().from('manual_grades').select('*')
-    .eq('center_id', centerId).eq('month', month).eq('year', year).limit(500);
+    .eq('center_id', centerId).eq('month', month).eq('grade_year', year).limit(500);
   if (error) throw error;
   return (data ?? []) as ManualGrade[];
 }
