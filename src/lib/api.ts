@@ -1777,3 +1777,45 @@ export async function devFetchProfilesCount(): Promise<{ total: number; byRole: 
   }
   return { total: data?.length ?? 0, byRole };
 }
+
+/** إحصاءات عداد الزوار (كل جهاز فريد يُعدّ مرة واحدة) */
+export interface VisitorStats { total: number; today: number; week: number; }
+export async function devFetchVisitorStats(): Promise<VisitorStats> {
+  const { data, error } = await getSupabase().rpc('get_site_visitor_stats');
+  if (error) throw error;
+  return (data ?? { total: 0, today: 0, week: 0 }) as VisitorStats;
+}
+
+/** أحدث الأجهزة المسجلة (المطور فقط) — لعرضها وحجب/إلغاء حجب أي جهاز */
+export interface VisitorRow {
+  id: string; device_id: string; first_seen: string; last_seen: string; blocked: boolean;
+}
+export async function devListVisitors(): Promise<VisitorRow[]> {
+  const { data, error } = await getSupabase().rpc('dev_list_visitors');
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as VisitorRow[];
+}
+
+/** حجب/إلغاء حجب جهاز (المطور فقط) */
+export async function devSetDeviceBlocked(deviceId: string, blocked: boolean): Promise<void> {
+  const { error } = await getSupabase().rpc('dev_set_device_blocked', { p_device_id: deviceId, p_blocked: blocked });
+  if (error) throw error;
+}
+
+/** آخر ظهور لصاحب كل سنتر — من سجل حضور الحساب لا من IP (المطور فقط) */
+export interface CenterOwnerPresence {
+  account_id: string; center_id: string; center_name: string; center_code: string;
+  owner_name: string; owner_email: string | null; last_seen: string | null; platform: string | null;
+}
+export async function devListCenterOwnerPresence(): Promise<CenterOwnerPresence[]> {
+  const { data, error } = await getSupabase().rpc('dev_list_center_owner_presence');
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as CenterOwnerPresence[];
+}
+
+/** تحديث حضور حساب المستخدم الحالي (يظهر للمطور متى آخر مرة فتح هذا الحساب التطبيق) */
+export async function touchMyAccountPresence(): Promise<void> {
+  const device = await getDeviceId();
+  const { error } = await getSupabase().rpc('touch_my_account_presence', { p_device_id: device, p_platform: 'android' });
+  if (error) throw error;
+}

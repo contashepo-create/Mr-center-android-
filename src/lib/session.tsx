@@ -7,6 +7,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 import { getSupabase, initSupabase, isSupabaseReady } from './supabase';
 import { registerPushToken } from './push';
+import { touchMyAccountPresence } from './api';
 import { claimMySession, isMySessionCurrent, registerMyStudentDevice } from './sessionGuard';
 import type { MySubscription, Profile, Role } from './types';
 
@@ -53,6 +54,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         // الجلسة المستعادة لا تمر دائماً بحدث SIGNED_IN؛ سجّل جهاز الطالب
         // دون إعادة مطالبة الجلسة حتى لا تستحوذ جلسة قديمة على جلسة أحدث.
         if (prof.role === 'student') void registerMyStudentDevice();
+        // حضور الحساب (ومنه صاحب السنتر) — لا يسجل IP ولا يعرقل تحميل الجلسة.
+        void touchMyAccountPresence().catch(() => {});
       } else {
         setSubscription(null);
       }
