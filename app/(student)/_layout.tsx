@@ -7,6 +7,7 @@ import { Stack } from 'expo-router';
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { LoadingView } from '../../src/components/controls';
+import { CommunicationHub } from '../../src/components/CommunicationHub';
 import { useSession } from '../../src/lib/session';
 import { colors, themedStyles } from '../../src/theme';
 
@@ -23,6 +24,7 @@ export default function StudentLayout() {
 
   return (
     <View style={styles.root}>
+      <CommunicationHub area="student" />
       <Stack
         screenOptions={{
           headerShown: false,
