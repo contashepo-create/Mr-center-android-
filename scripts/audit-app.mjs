@@ -156,11 +156,16 @@ check('تكامل واتساب (مكتبة + شاشة + أزرار الملف)',
     && readFileSync(join(root, 'app/(admin)/student/[id].tsx'), 'utf8').includes('sendGuardianReport');
 })());
 check('تواصل المطور واتساب مع السناتر', readFileSync(join(root, 'app/developer/centers.tsx'), 'utf8').includes('openWhatsApp'));
-check('بث المطور (أهداف + تتبع)', (() => {
+check('بث المطور (خمس قنوات + تسليم خادمي بلا حساب على الهاتف)', (() => {
   const code = readFileSync(join(root, 'app/developer/broadcast.tsx'), 'utf8');
-  return code.includes('all_owners') && code.includes('one_center') && code.includes('المطور:');
+  return code.includes('developerBroadcastNotification')
+    && ['center', 'all_owners', 'all_owners_students', 'all_students', 'staff'].every((c) => code.includes(`'${c}'`))
+    && code.includes('recipient_accounts');
 })());
-check('صندوق أصحاب السنتر', readFileSync(join(root, 'app/(admin)/dev-notices.tsx'), 'utf8').includes('markOwnerNoticeRead'));
+check('صندوق إشعارات المطور (لصاحب السنتر أو الموظف النشط عبر RPC)', (() => {
+  const code = readFileSync(join(root, 'app/(admin)/dev-notices.tsx'), 'utf8');
+  return code.includes('fetchMyDeveloperNotifications') && code.includes('markDeveloperNotificationRead') && code.includes('isStaff');
+})());
 check('تسجيل رمز الدفع عند الدخول', readFileSync(join(root, 'src/lib/session.tsx'), 'utf8').includes('registerPushToken'));
 check('العامل يدعم التذكير المجدول والفوري', (() => {
   const code = readFileSync(join(root, 'cloudflare/worker.js'), 'utf8');
@@ -339,11 +344,12 @@ check('تبديل الوضع في صفحة حول التطبيق', readFileSync(
 check('app.json يدعم الوضعين (automatic)', JSON.parse(readFileSync(join(root, 'app.json'), 'utf8')).expo.userInterfaceStyle === 'automatic');
 
 console.log('\n━━ فحص الكود: تحسينات هذه الجلسة ━');
-check('تجميع البثوث في مكتبة قابلة للاختبار', (() => {
-  const lib = readFileSync(join(root, 'src/lib/broadcast.ts'), 'utf8');
-  const ui = readFileSync(join(root, 'app/developer/broadcast.tsx'), 'utf8');
-  return lib.includes('groupBroadcasts') && ui.includes("from '../../src/lib/broadcast'")
-    && ui.includes("like('title', 'المطور: %')");
+check('بث المطور بقنوات خادمية موثقة بدل تجميع محلي للسجل القديم', (() => {
+  const api = readFileSync(join(root, 'src/lib/api.ts'), 'utf8');
+  const types = readFileSync(join(root, 'src/lib/types.ts'), 'utf8');
+  return api.includes("rpc('developer_broadcast_notification'")
+    && api.includes('fetchMyDeveloperNotifications') && api.includes('markDeveloperNotificationRead')
+    && types.includes('DeveloperBroadcastChannel') && types.includes('DeveloperBroadcastResult');
 })());
 check('النوافذ المنبثقة الحديثة (DetailSheet) مستخدمة في الإعلانات', (() => {
   const sheet = readFileSync(join(root, 'src/components/DetailSheet.tsx'), 'utf8');

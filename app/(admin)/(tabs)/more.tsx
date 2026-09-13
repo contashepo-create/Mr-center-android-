@@ -144,9 +144,7 @@ export default function MoreScreen() {
 
         <SectionTitle title="الإدارة" />
         <ListItem title="إشعارات الطلاب" subtitle="بث جماعي فوري ومجاني داخل التطبيق" icon="notifications" iconColor={colors.primary} onPress={() => router.push('/notifications')} />
-        {!isOwner(profile) ? null : (
-          <ListItem title="إشعارات المطور" subtitle="تنبيهات خاصة بإدارتك" icon="shield-checkmark" iconColor={colors.warning} onPress={() => router.push('/dev-notices')} />
-        )}
+        <ListItem title="إشعارات المطور" subtitle="تنبيهات مخصصة لحسابك أو دورك في السنتر" icon="shield-checkmark" iconColor={colors.warning} onPress={() => router.push('/dev-notices')} />
         <ListItem title="واتساب السنتر" subtitle="تنبيهات وتقارير ومستحقات مباشرة" icon="logo-whatsapp" iconColor={colors.success} onPress={() => router.push('/whatsapp')} />
         <ListItem title="المدفوعات والمستحقات" subtitle="توليد الاستحقاقات الشهرية وتسجيل الدفعات" icon="wallet" iconColor={colors.cyan} onPress={() => router.push('/payments')} />
         {isOwner(profile) ? (accountingEnabled ? <ListItem title="الحسابات" subtitle="إيرادات ومصروفات وقائمة مالية للسنتر" icon="calculator" iconColor={colors.success} onPress={() => router.push('/accounting')} /> : <ListItem title="الحسابات (خدمة مدفوعة)" subtitle="اعرف مزاياها واطلب تفعيلها" icon="lock-closed" iconColor={colors.warning} onPress={() => router.push('/accounting')} />) : null}
