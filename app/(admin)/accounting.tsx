@@ -8,7 +8,7 @@ import {FormMessage,OptionPicker} from '../../src/components/pickers';
 import {useSession} from '../../src/lib/session';
 import {getSupabase} from '../../src/lib/supabase';
 import {isOwner} from '../../src/lib/staff';
-import {amendAccountingLedgerEntry,amendStaffDeduction,closeFiscalYear,fetchAccountingEnabled,fetchFiscalYears,fetchStaffDeductions,openFiscalYear,recordManualLedgerEntry,recordPayrollSettlement,recordSalaryPayment,recordStaffAdvance,recordStaffDeduction} from '../../src/lib/api';
+import {amendAccountingLedgerEntry,amendStaffDeduction,closeFiscalYear,fetchAccountingEnabled,fetchFiscalYears,fetchStaffDeductions,openFiscalYear,recordManualLedgerEntry,recordPayrollSettlement,recordSalaryPayment,recordStaffAdvance,recordStaffCommissionPayment,recordStaffDeduction} from '../../src/lib/api';
 import {LEDGER_ENTRY_LABEL,periodTotals,summarizeEmployeePayroll,valueOf,type AccountingLedgerRow,type LedgerEntryType} from '../../src/lib/accounting';
 import {arabicError,todayIso} from '../../src/lib/utils';
 import type {FiscalYear,StaffDeduction} from '../../src/lib/types';
@@ -17,6 +17,7 @@ import { buildReportHtml, buildPayrollReportHtml, fetchReportBranding, shareRepo
 
 type Staff={id:string;full_name:string;role:string};
 type Ledger=AccountingLedgerRow & {center_id:string;category:string;description:string;occurred_on:string;created_by_name:string;source_payment_id:string|null;created_at:string};
+type CommissionRule={id:string;staff_id:string;rate:number;starts_on:string;ends_on:string|null;is_active:boolean};
 
 export default function Accounting(){
  const {profile}=useSession(); const [rows,setRows]=useState<Ledger[]>([]); const [staff,setStaff]=useState<Staff[]>([]);
@@ -24,9 +25,18 @@ export default function Accounting(){
  const [enabled,setEnabled]=useState<boolean|null>(null); const [years,setYears]=useState<FiscalYear[]>([]); const [newYear,setNewYear]=useState('');
  const [kind,setKind]=useState<'income'|'expense'>('expense'); const [entryType,setEntryType]=useState('general'); const [employee,setEmployee]=useState<string|null>(null);
  const [category,setCategory]=useState(''); const [desc,setDesc]=useState(''); const [amount,setAmount]=useState(''); const [bonus,setBonus]=useState('0');
- const [advanceApplied,setAdvanceApplied]=useState('0'); const [selectedDeductionIds,setSelectedDeductionIds]=useState<string[]>([]);
- const [fromDate,setFromDate]=useState(''); const [toDate,setToDate]=useState(''); const [commissionStaff,setCommissionStaff]=useState<string|null>(null); const [commissionRate,setCommissionRate]=useState('3');
+ const [advanceApplied,setAdvanceApplied]=useState('0'); const [selectedDeductionIds,setSelectedDeductionIds]=useState<string[]>([]); const [salaryCommission,setSalaryCommission]=useState('0');
+ const [fromDate,setFromDate]=useState(''); const [toDate,setToDate]=useState('');
+ const [rules,setRules]=useState<CommissionRule[]>([]);
  const [infoOpen,setInfoOpen]=useState(false); const [busy,setBusy]=useState(false); const [formError,setFormError]=useState<string|null>(null);
+
+ // نموذج قاعدة عمولة تحصيل (نسبة مرتبطة بفترة زمنية starts_on/ends_on بدل استبدال دائم)
+ const [ruleOpen,setRuleOpen]=useState(false); const [ruleStaff,setRuleStaff]=useState<string|null>(null); const [ruleRate,setRuleRate]=useState('3');
+ const [ruleStarts,setRuleStarts]=useState(todayIso()); const [ruleEnds,setRuleEnds]=useState(''); const [ruleActive,setRuleActive]=useState(true); const [ruleError,setRuleError]=useState<string|null>(null);
+
+ // نموذج صرف عمولة مستقلة (بدون ضمها لتسوية راتب)
+ const [commissionPayOpen,setCommissionPayOpen]=useState(false); const [commissionPayEmployee,setCommissionPayEmployee]=useState<string|null>(null);
+ const [commissionPayAmount,setCommissionPayAmount]=useState(''); const [commissionPayDesc,setCommissionPayDesc]=useState(''); const [commissionPayDate,setCommissionPayDate]=useState(todayIso()); const [commissionPayError,setCommissionPayError]=useState<string|null>(null);
 
  // نموذج تسجيل/تعديل خصم موظف — التزام معلّق حتى يُسوّى عند صرف راتبه
  const [deductionOpen,setDeductionOpen]=useState(false); const [deductionEditId,setDeductionEditId]=useState<string|null>(null);
@@ -41,7 +51,7 @@ export default function Accounting(){
 
  const load=useCallback(async()=>{if(!profile?.center_id)return;const sb=getSupabase();
   const en=await fetchAccountingEnabled(profile.center_id); setEnabled(en); if(!en)return;
-  const [{data:r},{data:s},y,d]=await Promise.all([sb.from('center_ledger').select('*').eq('center_id',profile.center_id).order('occurred_on',{ascending:false}).limit(200),sb.from('profiles').select('id,full_name,role').eq('center_id',profile.center_id).in('role',['teacher','manager','secretary']),fetchFiscalYears(profile.center_id),fetchStaffDeductions(profile.center_id).catch(()=>[])]);setRows((r??[]) as Ledger[]);setStaff(s??[]);setYears(y??[]);setDeductions(d)},[profile?.center_id]); useFocusEffect(useCallback(()=>{void load()},[load]));
+  const [{data:r},{data:s},y,d,{data:cr}]=await Promise.all([sb.from('center_ledger').select('*').eq('center_id',profile.center_id).order('occurred_on',{ascending:false}).limit(200),sb.from('profiles').select('id,full_name,role').eq('center_id',profile.center_id).in('role',['teacher','manager','secretary']),fetchFiscalYears(profile.center_id),fetchStaffDeductions(profile.center_id).catch(()=>[]),sb.from('staff_commission_rules').select('*').eq('center_id',profile.center_id).order('created_at',{ascending:false})]);setRows((r??[]) as Ledger[]);setStaff(s??[]);setYears(y??[]);setDeductions(d);setRules((cr??[]) as CommissionRule[])},[profile?.center_id]); useFocusEffect(useCallback(()=>{void load()},[load]));
  if(!isOwner(profile))return <GradientScreen><BackHeader title="الحسابات"/><NoAccess message="قسم الحسابات متاح لصاحب السنتر فقط."/></GradientScreen>;
  if(enabled===false)return <GradientScreen><BackHeader title="الحسابات" subtitle="خدمة مدفوعة"/><KeyboardScreen><SalesPitch/></KeyboardScreen></GradientScreen>;
 
@@ -70,7 +80,7 @@ export default function Accounting(){
     // فتُسوَّى ذرّياً ضمن نفس المعاملة (بدل الخصم الإجمالي المبسّط فقط).
     const advanceApp=Math.min(Number(advanceApplied)||0,employeeAdvanceOutstanding);
     await recordSalaryPayment({
-     centerId, employeeId:employee!, baseSalary:n, bonus:Math.max(0,Number(bonus)||0),
+     centerId, employeeId:employee!, baseSalary:n, bonus:Math.max(0,Number(bonus)||0), commission:Math.max(0,Number(salaryCommission)||0),
      advanceApplied:advanceApp, deductionApplied:selectedDeductionBalance, deductionIds:selectedDeductionIds,
      description:desc.trim(),
     });
@@ -81,7 +91,7 @@ export default function Accounting(){
     // عام/إيجار/مرافق/مشتريات: إيراد أو مصروف يدوي بسيط
     await recordManualLedgerEntry({centerId,kind,category:category.trim(),description:desc.trim(),amount:n});
    }
-   setCategory('');setDesc('');setAmount('');setBonus('0');setAdvanceApplied('0');setSelectedDeductionIds([]);setEmployee(null);await load();
+   setCategory('');setDesc('');setAmount('');setBonus('0');setSalaryCommission('0');setAdvanceApplied('0');setSelectedDeductionIds([]);setEmployee(null);await load();
    Alert.alert('تم الحفظ',emp?`تم تسجيل الحركة على ${emp.full_name}`:'تم تسجيل الحركة');
   }catch(e){setFormError(arabicError(e));}
   finally{setBusy(false);}
@@ -133,7 +143,41 @@ export default function Accounting(){
  const income=totals.income, expense=totals.operatingCosts;
  const collectorTotals=Object.entries(filteredRows.filter(r=>r.entry_type==='payment_collection').reduce((a:any,r:any)=>{const k=(r as any).created_by_name||'غير معروف';a[k]=(a[k]||0)+Number(r.amount);return a},{}));
  const employeeTotals=Object.entries(filteredRows.filter(r=>r.kind==='expense'&&r.employee_id).reduce((a:any,r:any)=>{const k=r.employee_id;a[k]=(a[k]||0)+Number(r.amount);return a},{}));
- const saveCommission = async()=>{if(!commissionStaff||!profile?.center_id)return;const rate=Number(commissionRate);if(rate<0||rate>100)return Alert.alert('نسبة غير صحيحة','أدخل نسبة بين 0 و100');const {error}=await getSupabase().from('staff_commission_rules').upsert({center_id:profile.center_id,staff_id:commissionStaff,rate,starts_on:fromDate||new Date().toISOString().slice(0,10),is_active:true},{onConflict:'center_id,staff_id'});if(error)Alert.alert('تعذر حفظ العمولة',error.message);else Alert.alert('تم الحفظ','تم تحديث نسبة العمولة للموظف');};
+ // قاعدة عمولة مرتبطة بفترة (starts_on/ends_on) بدل استبدال دائم — تسمح بتاريخ نسب متعدد للموظف نفسه بمرور الوقت
+ const openRuleForm=(r?:CommissionRule)=>{
+  setRuleError(null);
+  if(r){setRuleStaff(r.staff_id);setRuleRate(String(r.rate));setRuleStarts(r.starts_on);setRuleEnds(r.ends_on||'');setRuleActive(r.is_active);}
+  else{setRuleStaff(staff[0]?.id??null);setRuleRate('3');setRuleStarts(todayIso());setRuleEnds('');setRuleActive(true);}
+  setRuleOpen(true);
+ };
+ const saveRule=async()=>{
+  setRuleError(null);
+  if(!ruleStaff||!profile?.center_id)return setRuleError('اختر الموظف أولاً');
+  const rate=Number(ruleRate);
+  if(!Number.isFinite(rate)||rate<0||rate>100)return setRuleError('أدخل نسبة عمولة صحيحة بين 0 و100');
+  setBusy(true);
+  try{
+   const {error}=await getSupabase().from('staff_commission_rules').upsert({center_id:profile.center_id,staff_id:ruleStaff,rate,starts_on:ruleStarts||todayIso(),ends_on:ruleEnds||null,is_active:ruleActive},{onConflict:'center_id,staff_id'});
+   if(error)throw error;
+   setRuleOpen(false);await load();
+   Alert.alert('تم الحفظ','تم حفظ قاعدة العمولة');
+  }catch(e){setRuleError(arabicError(e));}
+  finally{setBusy(false);}
+ };
+ const openCommissionPay=()=>{setCommissionPayError(null);setCommissionPayEmployee(staff[0]?.id??null);setCommissionPayAmount('');setCommissionPayDesc('');setCommissionPayDate(todayIso());setCommissionPayOpen(true);};
+ const saveCommissionPayment=async()=>{
+  setCommissionPayError(null);
+  if(!commissionPayEmployee||!profile?.center_id)return setCommissionPayError('اختر الموظف أولاً');
+  const n=Number(commissionPayAmount);
+  if(!n||n<=0)return setCommissionPayError('أدخل مبلغ عمولة صحيح أكبر من صفر');
+  setBusy(true);
+  try{
+   await recordStaffCommissionPayment({centerId:profile.center_id,employeeId:commissionPayEmployee,amount:n,date:commissionPayDate||todayIso(),description:commissionPayDesc.trim()});
+   setCommissionPayOpen(false);await load();
+   Alert.alert('تم الصرف','تم تسجيل صرف العمولة المستقلة');
+  }catch(e){setCommissionPayError(arabicError(e));}
+  finally{setBusy(false);}
+ };
  const payroll=staff.map(emp=>{const s=summarizeEmployeePayroll(filteredRows as AccountingLedgerRow[],emp.id);return {...emp,salary:s.baseSalary,advance:s.advancesIssued,advanceOutstanding:s.advancesOutstanding,bonus:s.bonuses,commission:s.commissions,deduction:s.deductions,net:s.netPayroll};}).filter(x=>x.salary||x.advance||x.bonus||x.deduction||x.commission);
  const openDeductionsAll=deductions.filter(d=>d.status!=='settled');
 
@@ -166,11 +210,12 @@ export default function Accounting(){
   <SectionTitle title="إضافة مصروف / إيراد يدوي / راتب / سلفة"/>
   <Card>
    <Text style={styles.hint}>إيرادات الطلاب لا تُضاف يدوياً؛ تنتقل آلياً من التحصيل. استخدم «إيراد يدوي» لإيراد آخر غير مرتبط بطالب.</Text>
-   <OptionPicker label="نوع الحركة" value={kind==='income'?'general_income':entryType} options={[['general_expense','مصروف عام'],['general_income','إيراد يدوي آخر'],['salary','راتب موظف'],['advance','سلفة موظف'],['bonus','مكافأة'],['rent','إيجار'],['utility','مرافق'],['purchase','مشتريات']].map(([value,label])=>({value,label}))} onChange={(v)=>{setSelectedDeductionIds([]);setAdvanceApplied('0');setBonus('0');if(v==='general_income'){setKind('income');setEntryType('general');}else{setKind('expense');setEntryType(v==='general_expense'?'general':v);}}}/>
+   <OptionPicker label="نوع الحركة" value={kind==='income'?'general_income':entryType} options={[['general_expense','مصروف عام'],['general_income','إيراد يدوي آخر'],['salary','راتب موظف'],['advance','سلفة موظف'],['bonus','مكافأة'],['rent','إيجار'],['utility','مرافق'],['purchase','مشتريات']].map(([value,label])=>({value,label}))} onChange={(v)=>{setSelectedDeductionIds([]);setAdvanceApplied('0');setBonus('0');setSalaryCommission('0');if(v==='general_income'){setKind('income');setEntryType('general');}else{setKind('expense');setEntryType(v==='general_expense'?'general':v);}}}/>
    {['salary','advance','bonus'].includes(entryType)?<OptionPicker label="الموظف" value={employee} options={staff.map(s=>({value:s.id,label:`${s.full_name} — ${s.role==='teacher'?'مدرس':s.role==='secretary'?'سكرتير':'مدير'}`}))} onChange={(v)=>{setEmployee(v);setSelectedDeductionIds([]);setAdvanceApplied('0');}} placeholder="اختر الموظف"/>:null}
    <AppInput label="التصنيف" value={category} onChangeText={setCategory} placeholder="مثال: راتب سبتمبر"/>
    <AppInput label={entryType==='salary'?'الراتب الأساسي':'المبلغ'} value={amount} onChangeText={setAmount} keyboardType="decimal-pad"/>
    {entryType==='salary'?<AppInput label="مكافأة (اختياري)" value={bonus} onChangeText={setBonus} keyboardType="decimal-pad"/>:null}
+   {entryType==='salary'?<AppInput label="عمولة ضمن الراتب (اختياري)" value={salaryCommission} onChangeText={setSalaryCommission} keyboardType="decimal-pad"/>:null}
    {entryType==='salary'&&employee?<>
     <Text style={[styles.hint,{marginTop:spacing.sm}]}>رصيد السلف القائم لهذا الموظف: {employeeAdvanceOutstanding.toFixed(2)} جنيه</Text>
     {employeeAdvanceOutstanding>0?<AppInput label="سلفة تُخصم من هذا الراتب (اختياري)" value={advanceApplied} onChangeText={setAdvanceApplied} keyboardType="decimal-pad"/>:null}
@@ -202,7 +247,19 @@ export default function Accounting(){
 
   <SectionTitle title="تحصيل كل موظف"/>{collectorTotals.map(([name,total])=><Card key={name} style={styles.row}><Text style={styles.title}>{name}</Text><Text style={styles.money}>{Number(total).toFixed(2)} جنيه محصل</Text></Card>)}
 
-  <SectionTitle title="إعداد عمولة التحصيل"/><Card><OptionPicker label="الموظف" value={commissionStaff} options={staff.map(x=>({value:x.id,label:x.full_name}))} onChange={setCommissionStaff} placeholder="اختر الموظف"/><AppInput label="النسبة المئوية" value={commissionRate} onChangeText={setCommissionRate} keyboardType="decimal-pad"/><AppButton title="حفظ نسبة العمولة" icon="save" variant="success" onPress={saveCommission}/></Card>
+  <SectionTitle title="قواعد عمولة التحصيل" action={<AppButton title="+ قاعدة جديدة" icon="add-circle" small variant="outline" onPress={()=>openRuleForm()}/>}/>
+  {rules.length===0?<Card><Text style={styles.hint}>لا توجد قاعدة عمولة بعد — أضف نسبة لكل محصل لحساب مستحقه تلقائياً.</Text></Card>:rules.map(r=>{
+   const name=staff.find(s=>s.id===r.staff_id)?.full_name||'موظف';
+   return <Card key={r.id} style={styles.row}>
+    <Text style={styles.title}>{name} · {r.rate}%</Text>
+    <Text style={styles.meta}>سارية من {r.starts_on} إلى {r.ends_on||'بلا نهاية'} · {r.is_active?'فعالة':'موقوفة'}</Text>
+    <AppButton title="تعديل" icon="create" small variant="ghost" onPress={()=>openRuleForm(r)}/>
+   </Card>;
+  })}
+  <Card>
+   <Text style={styles.hint}>يمكن صرف العمولة ضمن راتب الموظف (حقل «عمولة ضمن الراتب» عند اختيار «راتب موظف» أعلاه) أو مستقلة عن الراتب بالكامل من هنا.</Text>
+   <AppButton title="صرف عمولة مستقلة" icon="cash" variant="outline" onPress={openCommissionPay}/>
+  </Card>
 
   <SectionTitle title="كشف الرواتب والسلفيات والخصومات"/>
   {payroll.map(p=><Card key={p.id} style={styles.row}>
@@ -234,6 +291,19 @@ export default function Accounting(){
    row={ledgerEditRow} date={ledgerEditDate} onDate={setLedgerEditDate} category={ledgerEditCategory} onCategory={setLedgerEditCategory}
    description={ledgerEditDesc} onDescription={setLedgerEditDesc} amount={ledgerEditAmount} onAmount={setLedgerEditAmount}
    error={ledgerEditError} busy={busy} onClose={()=>setLedgerEditRow(null)} onSave={saveLedgerEdit}
+  />
+
+  <RuleSheet
+   open={ruleOpen} staff={staff} employee={ruleStaff} onEmployee={setRuleStaff} rate={ruleRate} onRate={setRuleRate}
+   starts={ruleStarts} onStarts={setRuleStarts} ends={ruleEnds} onEnds={setRuleEnds} active={ruleActive} onActive={setRuleActive}
+   error={ruleError} busy={busy} onClose={()=>setRuleOpen(false)} onSave={saveRule}
+  />
+
+  <CommissionPaySheet
+   open={commissionPayOpen} staff={staff} employee={commissionPayEmployee} onEmployee={setCommissionPayEmployee}
+   amount={commissionPayAmount} onAmount={setCommissionPayAmount} date={commissionPayDate} onDate={setCommissionPayDate}
+   description={commissionPayDesc} onDescription={setCommissionPayDesc} error={commissionPayError} busy={busy}
+   onClose={()=>setCommissionPayOpen(false)} onSave={saveCommissionPayment}
   />
  </KeyboardScreen></GradientScreen>;
 }
@@ -296,6 +366,63 @@ function LedgerEditSheet({row,date,onDate,category,onCategory,description,onDesc
  </Modal>;
 }
 
+/** نافذة إضافة/تعديل قاعدة عمولة تحصيل — نسبة مرتبطة بفترة (starts_on/ends_on) */
+function RuleSheet({open,staff,employee,onEmployee,rate,onRate,starts,onStarts,ends,onEnds,active,onActive,error,busy,onClose,onSave}:{
+ open:boolean;staff:Staff[];employee:string|null;onEmployee:(v:string)=>void;rate:string;onRate:(v:string)=>void;
+ starts:string;onStarts:(v:string)=>void;ends:string;onEnds:(v:string)=>void;active:boolean;onActive:(v:boolean)=>void;
+ error:string|null;busy:boolean;onClose:()=>void;onSave:()=>void;
+}){
+ return <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
+  <View style={styles.modalBackdrop}>
+   <View style={styles.modalSheet}>
+    <Text style={styles.modalTitle}>قاعدة عمولة تحصيل</Text>
+    <ScrollView showsVerticalScrollIndicator={false}>
+     <Text style={styles.hint}>النسبة التي يستحقها الموظف من إجمالي تحصيله خلال فترة سريان القاعدة (يمكن ترك تاريخ الانتهاء فارغاً لقاعدة مفتوحة).</Text>
+     <OptionPicker label="الموظف" value={employee} options={staff.map(s=>({value:s.id,label:s.full_name}))} onChange={onEmployee} placeholder="اختر الموظف"/>
+     <AppInput label="نسبة العمولة %" value={rate} onChangeText={onRate} keyboardType="decimal-pad"/>
+     <AppInput label="تبدأ من YYYY-MM-DD" value={starts} onChangeText={onStarts}/>
+     <AppInput label="تنتهي في (اختياري)" value={ends} onChangeText={onEnds}/>
+     <Pressable style={styles.checkRow} onPress={()=>onActive(!active)}>
+      <Ionicons name={active?'checkbox':'square-outline'} size={20} color={active?colors.success:colors.textMuted}/>
+      <Text style={styles.title}>القاعدة فعّالة</Text>
+     </Pressable>
+     <FormMessage type="error" text={error}/>
+     <AppButton title="حفظ القاعدة" icon="checkmark" onPress={onSave} loading={busy}/>
+     <View style={{height:spacing.sm}}/>
+     <AppButton title="إلغاء" icon="close" variant="ghost" onPress={onClose}/>
+     <View style={{height:spacing.xl}}/>
+    </ScrollView>
+   </View>
+  </View>
+ </Modal>;
+}
+
+/** نافذة صرف عمولة مستقلة بدون ضمها لتسوية راتب */
+function CommissionPaySheet({open,staff,employee,onEmployee,amount,onAmount,date,onDate,description,onDescription,error,busy,onClose,onSave}:{
+ open:boolean;staff:Staff[];employee:string|null;onEmployee:(v:string)=>void;amount:string;onAmount:(v:string)=>void;
+ date:string;onDate:(v:string)=>void;description:string;onDescription:(v:string)=>void;error:string|null;busy:boolean;onClose:()=>void;onSave:()=>void;
+}){
+ return <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
+  <View style={styles.modalBackdrop}>
+   <View style={styles.modalSheet}>
+    <Text style={styles.modalTitle}>صرف عمولة مستقلة</Text>
+    <ScrollView showsVerticalScrollIndicator={false}>
+     <Text style={styles.hint}>يُستخدم إذا أردت صرف العمولة بمعزل عن تسوية الراتب — تظهر كحركة «عمولة مصروفة» منفصلة في السجل.</Text>
+     <OptionPicker label="الموظف" value={employee} options={staff.map(s=>({value:s.id,label:s.full_name}))} onChange={onEmployee} placeholder="اختر الموظف"/>
+     <AppInput label="المبلغ" value={amount} onChangeText={onAmount} keyboardType="decimal-pad"/>
+     <AppInput label="التاريخ YYYY-MM-DD" value={date} onChangeText={onDate}/>
+     <AppInput label="بيان الصرف (اختياري)" value={description} onChangeText={onDescription} multiline/>
+     <FormMessage type="error" text={error}/>
+     <AppButton title="صرف العمولة" icon="cash" onPress={onSave} loading={busy}/>
+     <View style={{height:spacing.sm}}/>
+     <AppButton title="إلغاء" icon="close" variant="ghost" onPress={onClose}/>
+     <View style={{height:spacing.xl}}/>
+    </ScrollView>
+   </View>
+  </View>
+ </Modal>;
+}
+
 /** الصفحة التسويقية لغير المشترك: ماذا سيحصل وماذا سيستفيد */
 function SalesPitch(){
  return <>
@@ -348,7 +475,7 @@ function InfoSheet({open,onClose}:{open:boolean;onClose:()=>void}){
        '«إضافة مصروف/راتب/سلفة»: اختر نوع الحركة، ولو كانت على موظف اختر اسمه. عند اختيار «راتب موظف» يمكنك اعتماد سلفة قائمة و/أو خصومات معلّقة محددة فتُسوَّى ذرّياً مع الراتب.',
        'إيرادات الطلاب لا تُدخل يدوياً أبداً — تنتقل آلياً من تسجيل الدفعات في قسم المدفوعات/المسح.',
        '«خصومات الموظفين»: سجّل خصماً معلّقاً على موظف في أي وقت (بسبب وتاريخ)، ويظهر مقترحاً عند صرف راتبه لاحقاً؛ يمكن تعديل مبلغه/سببه/تاريخه ما لم يُسدَّد بالكامل.',
-       '«تحصيل كل موظف» و«إعداد عمولة التحصيل»: اضبط نسبة العمولة لكل موظف ويُحسب مستحقها على تحصيله.',
+       '«تحصيل كل موظف» و«قواعد عمولة التحصيل»: أضف نسبة لكل موظف بفترة سريان محددة (من/إلى)، ويمكن أن يتغير لنفس الموظف عدة مرات بمرور الوقت دون فقد القاعدة القديمة. اصرف العمولة إما ضمن راتبه أو مستقلة عنه من زر «صرف عمولة مستقلة».',
        '«عهدة التحصيل» (من قائمة المزيد): المحصل يسلم عهدته يومياً ويُطابقها القسم بالتحصيل الفعلي، وانت تعتمدها من سجل العهد.',
        '«كشف الرواتب»: زر PDF لكل موظف يصدر كشفاً بالأساسي والمكافآت والسلف والخصومات والصافي.',
        '«تعديل القيد»: زر على كل حركة يدوية في «آخر الحركات» لتصحيح تاريخها/تصنيفها/بيانها/مبلغها — تحصيل الطالب وصرف الراتب لهما قيود خاصة يتحقق منها الخادم لحماية تكامل السجلات المرتبطة.',
@@ -368,6 +495,7 @@ const styles=themedStyles(()=>StyleSheet.create({filters:{gap:spacing.sm,flexDir
 deductionRow:{flexDirection:'row',alignItems:'center',gap:spacing.sm,backgroundColor:colors.surfaceAlt,borderRadius:radius.md,borderWidth:1,borderColor:colors.border,padding:spacing.sm,marginBottom:spacing.xs},
 deductionRowActive:{borderColor:colors.success,backgroundColor:colors.successBg},
 lockedType:{backgroundColor:colors.surfaceAlt,borderRadius:radius.md,padding:spacing.md,marginBottom:spacing.md},
+checkRow:{flexDirection:'row',alignItems:'center',gap:spacing.sm,marginBottom:spacing.md},
 pitchTitle:{color:colors.text,fontSize:font.lg,fontWeight:'900',textAlign:'right',marginBottom:spacing.sm},
 pitchText:{color:colors.textSecondary,fontSize:font.sm,textAlign:'right',lineHeight:21,marginBottom:spacing.sm},
 pitchRow:{flexDirection:'row',alignItems:'flex-start',gap:spacing.md},
