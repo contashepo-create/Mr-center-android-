@@ -2,8 +2,9 @@
 // اشتراكات السناتر (المطور): باقات احترافية + اعتماد طلبات الترقية
 // ============================================================
 
+import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { AppButton, AppInput, Card, EmptyState, LoadingView, SectionTitle } from '../../src/components/controls';
 import { DeveloperGate } from '../../src/components/DeveloperGate';
@@ -13,14 +14,21 @@ import {
   devFetchCenters, devFetchPendingRequests, devResolveRequest, devSetCenterStatus,
   devUpsertSubscription, logActivity, type CenterWithSub,
 } from '../../src/lib/api';
+import { ALERT_LABEL, devAuditUsage, devBlockCenter, devListUsageAlerts, devUnblockCenter, type UsageAlert } from '../../src/lib/features';
 import { useSession } from '../../src/lib/session';
 import { getSupabase } from '../../src/lib/supabase';
 import { planLabel, PRODUCTS } from '../../src/lib/billing';
 import type { PlanType, SubscriptionRequest } from '../../src/lib/types';
 import { arabicError, formatDate, formatMoney } from '../../src/lib/utils';
-import { colors, font, spacing, themedStyles } from '../../src/theme';
+import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 type ReqRow = SubscriptionRequest & { center_name?: string; center_code?: string };
+type MainTab = 'subs' | 'alerts';
+
+const MAIN_TABS: { value: MainTab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { value: 'subs', label: 'الطلبات والاشتراكات', icon: 'list' },
+  { value: 'alerts', label: 'تنبيهات التجاوز', icon: 'warning' },
+];
 
 export default function DevSubscriptionsScreen() {
   const { profile, ready } = useSession();
@@ -38,6 +46,72 @@ export default function DevSubscriptionsScreen() {
   const [entitlementStart, setEntitlementStart] = useState(new Date().toISOString().slice(0, 10));
   const [entitlementEnd, setEntitlementEnd] = useState('');
   const [openEnded, setOpenEnded] = useState(false);
+  const [mainTab, setMainTab] = useState<MainTab>('subs');
+  const [alerts, setAlerts] = useState<UsageAlert[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [alertsError, setAlertsError] = useState<string | null>(null);
+  const [auditing, setAuditing] = useState(false);
+  const [blockingId, setBlockingId] = useState<string | null>(null);
+
+  const loadAlerts = useCallback(async () => {
+    setAlertsLoading(true);
+    setAlertsError(null);
+    try {
+      setAlerts(await devListUsageAlerts());
+    } catch (e) {
+      setAlertsError(arabicError(e));
+    } finally {
+      setAlertsLoading(false);
+    }
+  }, []);
+
+  const audit = async () => {
+    setAuditing(true);
+    setAlertsError(null);
+    try {
+      await devAuditUsage();
+      await loadAlerts();
+    } catch (e) {
+      setAlertsError(arabicError(e));
+    } finally {
+      setAuditing(false);
+    }
+  };
+
+  const blockCenter = async (a: UsageAlert) => {
+    Alert.alert('حجب الحساب', `حجب حساب «${a.center_name}» لتجاوز حدود الاشتراك؟`, [
+      { text: 'إلغاء', style: 'cancel' },
+      {
+        text: 'حجب',
+        style: 'destructive',
+        onPress: async () => {
+          setBlockingId(a.center_id);
+          try {
+            await devBlockCenter(a.center_id);
+            await logActivity(a.center_id, 'center_blocked', 'حجب الحساب لتجاوز حدود الاشتراك');
+            await loadAlerts();
+          } catch (e) {
+            Alert.alert('خطأ', arabicError(e));
+          } finally {
+            setBlockingId(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const unblockCenter = async (a: UsageAlert) => {
+    setBlockingId(a.center_id);
+    try {
+      await devUnblockCenter(a.center_id);
+      await logActivity(a.center_id, 'center_unblocked', 'إلغاء حجب الحساب');
+      await loadAlerts();
+    } catch (e) {
+      Alert.alert('خطأ', arabicError(e));
+    } finally {
+      setBlockingId(null);
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -50,6 +124,7 @@ export default function DevSubscriptionsScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  useFocusEffect(useCallback(() => { if (mainTab === 'alerts') void loadAlerts(); }, [mainTab, loadAlerts]));
 
   if (!ready) {
     return <GradientScreen><LoadingView message="..." /></GradientScreen>;
@@ -147,8 +222,76 @@ export default function DevSubscriptionsScreen() {
 
   return (
     <GradientScreen>
-      <BackHeader title="اشتراكات السناتر" subtitle="باقات وطلبات ترقية" />
-      {loading ? (
+      <BackHeader title="اشتراكات السناتر" subtitle="باقات وطلبات ترقية وتنبيهات التجاوز" />
+      <View style={styles.tabsRow}>
+        {MAIN_TABS.map((t) => (
+          <Pressable
+            key={t.value}
+            onPress={() => setMainTab(t.value)}
+            style={[styles.tab, mainTab === t.value && styles.tabActive]}
+          >
+            <Ionicons name={t.icon} size={16} color={mainTab === t.value ? colors.text : colors.textMuted} />
+            <Text style={[styles.tabText, mainTab === t.value && styles.tabTextActive]}>
+              {t.label}{t.value === 'alerts' && alerts.filter((a) => a.status === 'open').length > 0 ? ` (${alerts.filter((a) => a.status === 'open').length})` : ''}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      {mainTab === 'alerts' ? (
+        <KeyboardScreen>
+          <SectionTitle
+            title="تنبيهات تجاوز حدود الاشتراك"
+            action={<AppButton title={auditing ? 'جارٍ الفحص...' : 'إعادة فحص'} icon="refresh" small variant="outline" onPress={audit} loading={auditing} />}
+          />
+          <FormMessage type="info" text="التنبيه يبقى ظاهراً حتى يُحل تلقائياً (عودة الاستخدام للحدود) أو يحجب المطور الحساب. إن لم تظهر تنبيهات رغم وجود تجاوز، اضغط «إعادة فحص»." />
+          {alertsError ? <FormMessage type="error" text={alertsError} /> : null}
+          {alertsLoading ? (
+            <LoadingView message="جاري التحميل..." />
+          ) : alerts.length === 0 ? (
+            <EmptyState icon="checkmark-done-outline" title="لا توجد تنبيهات" message="اضغط «إعادة فحص» أعلى الصفحة لفحص كل السناتر." />
+          ) : (
+            alerts.map((a) => {
+              const used = (a.detail as { used?: number })?.used ?? null;
+              const limit = (a.detail as { limit?: number })?.limit ?? null;
+              const isOpen = a.status === 'open';
+              return (
+                <Card key={a.id} style={styles.reqCard}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <Text style={styles.reqTitle}>{a.center_name}</Text>
+                    <View style={[styles.badge, { backgroundColor: isOpen ? colors.dangerBg : colors.successBg }]}>
+                      <Text style={[styles.badgeText, { color: isOpen ? colors.danger : colors.success }]}>
+                        {isOpen ? 'مفتوح' : a.resolution === 'blocked' ? 'حُلّ بالحجب' : 'حُلّ تلقائياً'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.reqMeta, { writingDirection: 'ltr' }]}>{a.center_code}</Text>
+                  <Text style={[styles.reqMeta, { marginTop: spacing.xs }]}>
+                    {a.title} · {ALERT_LABEL[a.kind]}
+                    {used !== null ? ` · الاستخدام: ${used}${limit !== null && limit < 2147483647 ? ` / ${limit}` : ''}` : ''}
+                  </Text>
+                  <View style={{ marginTop: spacing.md }}>
+                    {isOpen ? (
+                      <AppButton
+                        title={blockingId === a.center_id ? 'جارٍ الحجب...' : 'حجب الحساب'}
+                        icon="ban" small variant="danger"
+                        onPress={() => blockCenter(a)}
+                        loading={blockingId === a.center_id}
+                      />
+                    ) : (
+                      <AppButton
+                        title={blockingId === a.center_id ? '...' : 'إلغاء الحجب'}
+                        icon="lock-open" small variant="outline"
+                        onPress={() => unblockCenter(a)}
+                        loading={blockingId === a.center_id}
+                      />
+                    )}
+                  </View>
+                </Card>
+              );
+            })
+          )}
+        </KeyboardScreen>
+      ) : loading ? (
         <LoadingView message="جاري التحميل..." />
       ) : (
         <KeyboardScreen>
@@ -277,6 +420,17 @@ export default function DevSubscriptionsScreen() {
 }
 
 const styles = themedStyles(() => StyleSheet.create({
+  tabsRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.md },
+  tab: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.md, paddingVertical: spacing.sm,
+  },
+  tabActive: { backgroundColor: colors.primary + '33', borderColor: colors.primary },
+  tabText: { color: colors.textMuted, fontSize: font.sm, fontWeight: '700' },
+  tabTextActive: { color: colors.text },
+  badge: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.full },
+  badgeText: { fontSize: font.xs, fontWeight: '800' },
   dim: { color: colors.textSecondary, fontSize: font.md },
   dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
   value: { color: colors.text, fontSize: font.md, fontWeight: '800' },
