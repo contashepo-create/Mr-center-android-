@@ -11,7 +11,7 @@ import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { FormMessage } from '../../src/components/pickers';
 import { can } from '../../src/lib/staff';
 import {
-  deleteSurvey, fetchStudents, fetchSurveyResponses, fetchSurveys, toggleSurvey, upsertSurvey,
+  deleteSurvey, fetchStudents, fetchSurveyResponseCounts, fetchSurveyResponses, fetchSurveys, toggleSurvey, upsertSurvey,
 } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import type { AppSurvey, AppSurveyResponse, Student } from '../../src/lib/types';
@@ -23,6 +23,7 @@ export default function SurveysScreen() {
   const centerId = profile?.center_id ?? '';
   const [surveys, setSurveys] = useState<AppSurvey[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [responseCounts, setResponseCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -43,8 +44,10 @@ export default function SurveysScreen() {
   const load = useCallback(async () => {
     if (!centerId) return;
     try {
-      const [sv, st] = await Promise.all([fetchSurveys(centerId), fetchStudents(centerId)]);
-      setSurveys(sv); setStudents(st);
+      const [sv, st, counts] = await Promise.all([
+        fetchSurveys(centerId), fetchStudents(centerId), fetchSurveyResponseCounts(centerId).catch(() => ({})),
+      ]);
+      setSurveys(sv); setStudents(st); setResponseCounts(counts);
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
@@ -159,7 +162,9 @@ export default function SurveysScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.svTitle} numberOfLines={1}>{item.title}</Text>
-                  <Text style={styles.svMeta}>{item.questions.length} أسئلة · {formatDate(item.created_at)}</Text>
+                  <Text style={styles.svMeta}>
+                    {item.questions.length} أسئلة · {formatDate(item.created_at)} · {responseCounts[item.id] ?? 0} إجابة
+                  </Text>
                 </View>
                 <View style={[styles.pubPill, { backgroundColor: item.is_active ? colors.successBg : colors.warningBg }]}>
                   <Text style={[styles.pubText, { color: item.is_active ? colors.success : colors.warning }]}>

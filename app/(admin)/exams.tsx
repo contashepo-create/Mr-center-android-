@@ -22,7 +22,7 @@ import {
   arabicError, examMarksTotal, EXAM_TYPE_LABEL, formatDate, isManualExamType,
   normalizeAnswerText, validateExamDraft,
 } from '../../src/lib/utils';
-import { buildReportHtml, shareReportPdf } from '../../src/lib/report';
+import { buildReportHtml, fetchReportBranding, shareReportPdf } from '../../src/lib/report';
 import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 interface DraftQ {
@@ -328,11 +328,12 @@ export default function ExamsScreen() {
 
   const printPaper = async (e: AppExam) => {
     try {
+      const branding = await fetchReportBranding(centerId);
       const html = buildReportHtml(`امتحان: ${e.title}`, `${e.subject} — ${e.questions.length} أسئلة — ${e.duration_minutes} دقيقة — من ${e.total_score}`, [{
         title: 'الأسئلة (ورقية — بلا إجابات)',
         headers: ['م', 'السؤال', 'الاختيارات'],
         rows: paperRows(e),
-      }]);
+      }], { name: profile?.full_name, branding });
       await shareReportPdf(html, `امتحان ${e.title}`);
     } catch (err) {
       Alert.alert('تعذر الطباعة', arabicError(err));

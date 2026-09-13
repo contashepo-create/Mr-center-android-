@@ -19,7 +19,7 @@ import {
 import { useSession } from '../../src/lib/session';
 import type { AppExam, Due, ExamAttempt, Grade, Group, ManualGrade, Payment, Student } from '../../src/lib/types';
 import { arabicError, arabicMonth, formatDate, formatMoney } from '../../src/lib/utils';
-import { buildReportHtml, shareReportPdf } from '../../src/lib/report';
+import { buildReportHtml, fetchReportBranding, shareReportPdf } from '../../src/lib/report';
 import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: arabicMonth(i + 1) }));
@@ -269,10 +269,12 @@ export default function ReportsScreen() {
       });
     }
     try {
+      const branding = await fetchReportBranding(centerId);
       const html = buildReportHtml(
         `تقرير ${kindLabel}: ${student.name}`,
         `المجموعة: ${gradeLabel} · شهر ${arabicMonth(m)} ${y}`,
         sections,
+        { name: profile?.full_name, branding },
       );
       await shareReportPdf(html, `تقرير ${student.name}`);
     } catch (e) {
@@ -301,6 +303,7 @@ export default function ReportsScreen() {
             rows: gradesAvg.map((g) => [g.name, g.avg, String(g.count)]),
           },
         ],
+        { name: profile?.full_name, branding: await fetchReportBranding(centerId) },
       );
       await shareReportPdf(html, `تقرير ${arabicMonth(m)} ${y}`);
     } catch (e) {
@@ -318,6 +321,7 @@ export default function ReportsScreen() {
           headers: ['الطالب', 'التقييم', 'الدرجة'],
           rows: monthGrades.map((g) => [nameOf(g.student_id), g.title, `${g.score}/${g.max_score}`]),
         }],
+        { name: profile?.full_name, branding: await fetchReportBranding(centerId) },
       );
       await shareReportPdf(html, `درجات ${arabicMonth(m)} ${y}`);
     } catch (e) {
@@ -350,6 +354,7 @@ export default function ReportsScreen() {
             ]),
           },
         ],
+        { name: profile?.full_name, branding: await fetchReportBranding(centerId) },
       );
       await shareReportPdf(html, `نشاط ${arabicMonth(m)} ${y}`);
     } catch (e) {

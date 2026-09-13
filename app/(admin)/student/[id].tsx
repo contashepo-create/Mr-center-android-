@@ -17,7 +17,7 @@ import {
 import { guardianReportText, openWhatsApp } from '../../../src/lib/whatsapp';
 import { useSession } from '../../../src/lib/session';
 import { can, isOwner } from '../../../src/lib/staff';
-import { buildReportHtml, shareReportPdf } from '../../../src/lib/report';
+import { buildReportHtml, fetchReportBranding, shareReportPdf } from '../../../src/lib/report';
 import type { Attendance, Due, ExamAttempt, Grade, Group, ManualGrade, Payment, Student } from '../../../src/lib/types';
 import { arabicError, arabicMonth, formatDate, formatDays, formatMoney, formatTimeAr } from '../../../src/lib/utils';
 import { colors, font, radius, spacing, themedStyles } from '../../../src/theme';
@@ -283,6 +283,7 @@ export default function StudentFileScreen() {
             rows: honors.map((h) => [h.details ?? h.name, formatDate(h.created_at)]),
           },
         ],
+        { name: profile?.full_name, branding: await fetchReportBranding(centerId) },
       );
       await shareReportPdf(html, `تقرير ${student.name}`);
     } catch (e) {

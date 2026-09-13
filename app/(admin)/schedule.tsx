@@ -13,7 +13,7 @@ import { useTeacherGroupIds } from '../../src/lib/staff';
 import { useSession } from '../../src/lib/session';
 import type { Group } from '../../src/lib/types';
 import { arabicDay, arabicError, findGroupConflicts, formatMoney, formatTimeAr, timeToMinutes, WEEK_DAYS } from '../../src/lib/utils';
-import { buildReportHtml, shareReportPdf } from '../../src/lib/report';
+import { buildReportHtml, fetchReportBranding, shareReportPdf } from '../../src/lib/report';
 import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 export default function ScheduleScreen() {
@@ -52,6 +52,7 @@ export default function ScheduleScreen() {
 
   const exportPdf = async () => {
     try {
+      const branding = await fetchReportBranding(centerId);
       const html = buildReportHtml('الجدول الأسبوعي', `${scoped.length} مجموعة`,       byDay.map((d) => ({
         title: arabicDay(d.day),
         headers: ['المجموعة', 'الموعد', 'الرسوم'],
@@ -62,7 +63,7 @@ export default function ScheduleScreen() {
             : '—',
           priceOf(g),
         ]),
-      })));
+      })), { name: profile?.full_name, branding });
       await shareReportPdf(html, 'الجدول الأسبوعي');
     } catch (e) {
       Alert.alert('تعذر التصدير', arabicError(e));

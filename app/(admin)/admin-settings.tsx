@@ -8,12 +8,13 @@ import React, { useEffect, useState } from 'react';
 import { Alert, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { AppButton, AppInput, Card, ListItem, NoAccess, SectionTitle } from '../../src/components/controls';
 import { BackHeader, GradientScreen, KeyboardScreen } from '../../src/components/layout';
-import { FormMessage } from '../../src/components/pickers';
+import { FormMessage, OptionPicker } from '../../src/components/pickers';
 import { fetchCenterSettings, fetchMyCenter, saveCenterSettings } from '../../src/lib/api';
 import { isOwner } from '../../src/lib/staff';
 import { useSession } from '../../src/lib/session';
 import { fetchPublicConfig } from '../../src/lib/supabase';
 import { exportCenterBackup } from '../../src/lib/backup';
+import { DEFAULT_CENTER_PRINT_SETTINGS } from '../../src/lib/printing';
 import type { Center, CenterSettings, PublicConfig } from '../../src/lib/types';
 import { planLabel } from '../../src/lib/billing';
 import { arabicError, formatDate, isValidEmail, isValidPhone } from '../../src/lib/utils';
@@ -25,6 +26,7 @@ export default function AdminSettingsScreen() {
   const [cfg, setCfg] = useState<PublicConfig>({});
   const [settings, setSettings] = useState<CenterSettings>({
     whatsapp: '', contact_email: '', registration_open: true, archive_year: '',
+    print: DEFAULT_CENTER_PRINT_SETTINGS,
   });
   const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -208,6 +210,128 @@ export default function AdminSettingsScreen() {
           <FormMessage type="error" text={settingsError} />
           <FormMessage type="success" text={settingsMsg} />
           <AppButton title="حفظ الإعدادات" icon="checkmark" small onPress={saveSettings} loading={saving} />
+        </Card>
+
+        {/* هوية الطباعة */}
+        <SectionTitle title="هوية الطباعة (شعار، علامة مائية، تذييل)" />
+        <Card>
+          <Text style={styles.note}>
+            تُطبَّق هذه الهوية تلقائياً على كل المستندات المطبوعة: الاختبارات، التقارير، كشوف الرواتب، وتسويات العهدة.
+          </Text>
+          <View style={{ height: spacing.sm }} />
+          <Pressable
+            style={styles.toggleRow}
+            onPress={() => setSettings((s) => ({ ...s, print: { ...s.print, header_show_center_name: !s.print.header_show_center_name } }))}
+          >
+            <Ionicons
+              name={settings.print.header_show_center_name ? 'checkbox' : 'square-outline'}
+              size={22}
+              color={settings.print.header_show_center_name ? colors.success : colors.textMuted}
+            />
+            <Text style={styles.toggleTitle}>إظهار اسم السنتر في ترويسة المستندات</Text>
+          </Pressable>
+
+          <AppInput
+            label="رابط شعار السنتر (اختياري — https://)"
+            icon="image"
+            placeholder="https://example.com/logo.png"
+            value={settings.print.logo_url}
+            onChangeText={(v) => setSettings((s) => ({ ...s, print: { ...s.print, logo_url: v } }))}
+            autoCapitalize="none"
+            textAlign="left"
+            style={{ writingDirection: 'ltr' }}
+          />
+          {settings.print.logo_url ? (
+            <OptionPicker
+              label="مكان الشعار في الورقة"
+              icon="locate"
+              value={settings.print.logo_position}
+              options={[
+                { value: 'top_right', label: 'أعلى اليمين' },
+                { value: 'top_left', label: 'أعلى اليسار' },
+                { value: 'top_center', label: 'أعلى المنتصف' },
+                { value: 'bottom_right', label: 'أسفل اليمين' },
+                { value: 'bottom_left', label: 'أسفل اليسار' },
+              ]}
+              onChange={(v) => setSettings((s) => ({ ...s, print: { ...s.print, logo_position: v as CenterSettings['print']['logo_position'] } }))}
+            />
+          ) : null}
+
+          <Pressable
+            style={styles.toggleRow}
+            onPress={() => setSettings((s) => ({ ...s, print: { ...s.print, watermark_enabled: !s.print.watermark_enabled } }))}
+          >
+            <Ionicons
+              name={settings.print.watermark_enabled ? 'checkbox' : 'square-outline'}
+              size={22}
+              color={settings.print.watermark_enabled ? colors.success : colors.textMuted}
+            />
+            <Text style={styles.toggleTitle}>تفعيل العلامة المائية</Text>
+          </Pressable>
+          {settings.print.watermark_enabled ? (
+            <>
+              <AppInput
+                label="نص العلامة المائية (فارغ = اسم السنتر)"
+                icon="text"
+                placeholder={center?.name ?? 'اسم السنتر'}
+                value={settings.print.watermark_text}
+                onChangeText={(v) => setSettings((s) => ({ ...s, print: { ...s.print, watermark_text: v } }))}
+              />
+              <OptionPicker
+                label="نمط توزيع العلامة"
+                icon="grid"
+                value={settings.print.watermark_pattern}
+                options={[
+                  { value: 'single', label: 'علامة واحدة في المنتصف' },
+                  { value: 'grid', label: 'شبكة متساوية تغطي الورقة' },
+                  { value: 'staggered', label: 'شبكة متداخلة تغطي الورقة' },
+                ]}
+                onChange={(v) => setSettings((s) => ({ ...s, print: { ...s.print, watermark_pattern: v as CenterSettings['print']['watermark_pattern'] } }))}
+              />
+              <OptionPicker
+                label="اتجاه النص"
+                icon="swap-horizontal"
+                value={settings.print.watermark_direction}
+                options={[
+                  { value: 'diagonal', label: 'مائل قطرياً' },
+                  { value: 'vertical', label: 'طولي' },
+                  { value: 'horizontal', label: 'أفقي' },
+                ]}
+                onChange={(v) => setSettings((s) => ({ ...s, print: { ...s.print, watermark_direction: v as CenterSettings['print']['watermark_direction'] } }))}
+              />
+              <OptionPicker
+                label="طبقة العلامة"
+                icon="layers"
+                value={settings.print.watermark_layer}
+                options={[
+                  { value: 'front', label: 'فوق الأسئلة والجداول (موصى به)' },
+                  { value: 'behind', label: 'خلف المحتوى' },
+                ]}
+                onChange={(v) => setSettings((s) => ({ ...s, print: { ...s.print, watermark_layer: v as CenterSettings['print']['watermark_layer'] } }))}
+              />
+            </>
+          ) : null}
+
+          <Pressable
+            style={styles.toggleRow}
+            onPress={() => setSettings((s) => ({ ...s, print: { ...s.print, footer_enabled: !s.print.footer_enabled } }))}
+          >
+            <Ionicons
+              name={settings.print.footer_enabled ? 'checkbox' : 'square-outline'}
+              size={22}
+              color={settings.print.footer_enabled ? colors.success : colors.textMuted}
+            />
+            <Text style={styles.toggleTitle}>تفعيل تذييل المستند</Text>
+          </Pressable>
+          {settings.print.footer_enabled ? (
+            <AppInput
+              label="عنوان السنتر في التذييل (اختياري)"
+              icon="location"
+              placeholder="العنوان الذي يظهر أسفل كل مستند"
+              value={settings.print.footer_address}
+              onChangeText={(v) => setSettings((s) => ({ ...s, print: { ...s.print, footer_address: v } }))}
+            />
+          ) : null}
         </Card>
 
         {/* النسخ الاحتياطي */}

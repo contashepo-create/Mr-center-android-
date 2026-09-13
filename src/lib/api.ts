@@ -7,6 +7,7 @@ import { getSupabase } from './supabase';
 import { getDeviceId } from './visitors';
 import { claimMySession } from './sessionGuard';
 import { nowIso, todayIso, uuid } from './utils';
+import { brandForCenter, DEFAULT_CENTER_PRINT_SETTINGS, normalizeCenterPrintSettings, type CenterPrintBranding } from './printing';
 import type {
   Announcement, AppExam, AppInquiry, AppNotification, AppSurvey, AppSurveyResponse, Attendance, AttendanceStatus,
   BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, FiscalYear, Grade, StaffInviteRow,
@@ -1354,6 +1355,18 @@ export async function fetchSurveyResponses(surveyId: string): Promise<AppSurveyR
   return (data ?? []) as AppSurveyResponse[];
 }
 
+/** أعداد الردود لكل استبيان، لتظهر حالة المشاركة في القائمة دون فتح كل استبيان. */
+export async function fetchSurveyResponseCounts(centerId: string): Promise<Record<string, number>> {
+  const { data, error } = await getSupabase().from('app_survey_responses').select('survey_id')
+    .eq('center_id', centerId).limit(5000);
+  if (error) throw error;
+  return (data ?? []).reduce<Record<string, number>>((counts, row) => {
+    const id = String((row as { survey_id?: string }).survey_id ?? '');
+    if (id) counts[id] = (counts[id] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
 export async function fetchMySurveyResponses(studentId: string): Promise<AppSurveyResponse[]> {
   const { data, error } = await getSupabase().from('app_survey_responses').select('*')
     .eq('student_id', studentId).limit(200);
@@ -1550,6 +1563,7 @@ export async function markNotificationRead(centerId: string, notificationId: str
 
 const DEFAULT_SETTINGS: CenterSettings = {
   whatsapp: '', contact_email: '', registration_open: true, archive_year: '',
+  print: DEFAULT_CENTER_PRINT_SETTINGS,
 };
 
 export async function fetchCenterSettings(centerId: string): Promise<CenterSettings> {
@@ -1562,7 +1576,14 @@ export async function fetchCenterSettings(centerId: string): Promise<CenterSetti
     contact_email: s.contact_email ?? '',
     registration_open: s.registration_open ?? true,
     archive_year: s.archive_year ?? '',
+    print: normalizeCenterPrintSettings(s.print),
   };
+}
+
+/** هوية الوثائق في كل شاشة طباعة؛ تُقرأ وقت الطباعة حتى يطبق آخر تعديل فوراً. */
+export async function fetchCenterPrintBranding(centerId: string): Promise<CenterPrintBranding> {
+  const [settings, center] = await Promise.all([fetchCenterSettings(centerId), fetchMyCenter(centerId)]);
+  return brandForCenter(center?.name, settings.print);
 }
 
 export async function saveCenterSettings(centerId: string, s: CenterSettings): Promise<void> {
@@ -1573,6 +1594,7 @@ export async function saveCenterSettings(centerId: string, s: CenterSettings): P
       contact_email: s.contact_email.trim(),
       registration_open: !!s.registration_open,
       archive_year: s.archive_year.trim(),
+      print: normalizeCenterPrintSettings(s.print),
     },
     updated_at: nowIso(),
   });

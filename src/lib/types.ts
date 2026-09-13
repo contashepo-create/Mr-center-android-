@@ -465,11 +465,41 @@ export interface CommunicationSummary {
   messages: CommunicationBucket;
 }
 
+export type PrintLogoPosition = 'top_right' | 'top_left' | 'top_center' | 'bottom_right' | 'bottom_left';
+export type PrintWatermarkDirection = 'diagonal' | 'vertical' | 'horizontal';
+export type PrintWatermarkPattern = 'single' | 'grid' | 'staggered';
+export type PrintWatermarkLayer = 'front' | 'behind';
+
+/** هوية طباعة السنتر: شعار وعلامة مائية وتذييل موحّد لكل المستندات المطبوعة. */
+export interface CenterPrintSettings {
+  footer_address: string;
+  footer_enabled: boolean;
+  footer_show_center_name: boolean;
+  footer_show_address: boolean;
+  footer_font_size: number;
+  header_show_center_name: boolean;
+  logo_url: string;
+  logo_position: PrintLogoPosition;
+  logo_size: number;
+  watermark_enabled: boolean;
+  watermark_text: string;
+  watermark_image: string;
+  watermark_opacity: number;
+  watermark_direction: PrintWatermarkDirection;
+  watermark_pattern: PrintWatermarkPattern;
+  watermark_repeat_count: number;
+  watermark_font_size: number;
+  watermark_image_size: number;
+  watermark_color: string;
+  watermark_layer: PrintWatermarkLayer;
+}
+
 export interface CenterSettings {
   whatsapp: string;
   contact_email: string;
   registration_open: boolean;
   archive_year: string;
+  print: CenterPrintSettings;
 }
 
 export interface PublicConfig {
