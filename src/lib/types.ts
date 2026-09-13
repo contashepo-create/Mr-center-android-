@@ -65,6 +65,7 @@ export interface Grade {
   center_id: string;
   name: string;
   academic_year: string;
+  sort_order: number;
   created_at: string;
 }
 
@@ -356,6 +357,10 @@ export interface AppInquiry {
   body: string;
   status: InquiryStatus;
   reply: string | null;
+  /** تفاصيل طلب الانتقال؛ موجودة فقط عندما kind = transfer. */
+  from_group_id?: string | null;
+  to_group_id?: string | null;
+  resolved_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -380,12 +385,26 @@ export interface AppSurveyResponse {
 
 export type NotificationAudience = 'all' | 'grade' | 'group' | 'student' | 'owners' | 'staff';
 
-/** قنوات بث المطور الخمس، متطابقة مع الويب وموثقة خادمياً عبر RPC. */
-export type DeveloperBroadcastChannel = 'center' | 'all_owners' | 'all_owners_students' | 'all_students' | 'staff';
-export type CenterBroadcastDelivery = 'owners' | 'owners_students';
+/** طريقة وصول بث المطور: إشعار في الجرس، رسالة في صندوق الرسائل، أو نافذة طارئة مع سجل. */
+export type DeveloperBroadcastPresentation = 'notification' | 'message' | 'urgent';
+
+/** قنوات بث المطور الشاملة، متطابقة مع الويب وموثقة خادمياً عبر RPC. */
+export type DeveloperBroadcastChannel =
+  | 'center'
+  | 'all_owners'
+  | 'all_owners_staff'
+  | 'all_owners_students'
+  | 'all_students'
+  | 'staff'
+  | 'all_project';
+
+/** مستلمو السنتر المحدد؛ كل اختيار يولّد صفاً واحداً فقط لكل دور، بلا رسائل مكررة. */
+export type CenterBroadcastDelivery = 'owners' | 'owners_staff' | 'owners_students' | 'owners_students_staff' | 'students' | 'staff' | 'everyone';
 
 export interface DeveloperBroadcastResult {
   channel: DeveloperBroadcastChannel;
+  presentation?: DeveloperBroadcastPresentation;
+  broadcast_id?: string;
   centers: number;
   notification_rows: number;
   recipient_accounts: number;
@@ -406,7 +425,29 @@ export interface MyNotification {
   title: string;
   body: string;
   created_at: string;
+  /** notification = الجرس، message = صندوق الرسائل، urgent = نافذة طارئة وسجل. */
+  presentation?: DeveloperBroadcastPresentation;
   is_read: boolean;
+}
+
+export interface CommunicationItem {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  presentation?: DeveloperBroadcastPresentation;
+  route: string;
+  kind: 'notification' | 'developer_message' | 'support_message';
+}
+
+export interface CommunicationBucket {
+  unread: number;
+  items: CommunicationItem[];
+}
+
+export interface CommunicationSummary {
+  notifications: CommunicationBucket;
+  messages: CommunicationBucket;
 }
 
 export interface CenterSettings {

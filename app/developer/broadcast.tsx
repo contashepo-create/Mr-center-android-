@@ -1,5 +1,5 @@
 // ============================================================
-// بث المطور: خمس قنوات مخصصة، مع اختيار المستلمين خادمياً لا من الهاتف.
+// بث المطور: قنوات مخصصة شاملة، مع اختيار المستلمين وطريقة العرض خادمياً لا من الهاتف.
 // ============================================================
 
 import { useFocusEffect } from 'expo-router';
@@ -11,18 +11,26 @@ import { BackHeader, GradientScreen, KeyboardScreen } from '../../src/components
 import { FormMessage, OptionPicker } from '../../src/components/pickers';
 import { devFetchCenters, developerBroadcastNotification, type CenterWithSub } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
-import type { CenterBroadcastDelivery, DeveloperBroadcastChannel } from '../../src/lib/types';
+import type { CenterBroadcastDelivery, DeveloperBroadcastChannel, DeveloperBroadcastPresentation } from '../../src/lib/types';
 import { arabicError } from '../../src/lib/utils';
 import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 type StaffScope = 'all_centers' | 'one_center';
 
 const channels: { value: DeveloperBroadcastChannel; label: string; description: string }[] = [
-  { value: 'center', label: '١. سنتر محدد', description: 'صاحب السنتر فقط أو صاحبه وطلابه.' },
+  { value: 'center', label: '١. سنتر محدد', description: 'صاحب السنتر، أو صاحبه وموظفيه وطلابه حسب ما تختار.' },
   { value: 'all_owners', label: '٢. أصحاب السناتر كلها', description: 'رسالة لأصحاب كل السناتر فقط.' },
-  { value: 'all_owners_students', label: '٣. السناتر وطلابها كلها', description: 'رسالة لأصحاب السناتر وكل الطلاب.' },
-  { value: 'all_students', label: '٤. الطلاب كلها فقط', description: 'لا تصل لأصحاب السناتر أو الموظفين.' },
-  { value: 'staff', label: '٥. موظفو السناتر', description: 'مدرسون ومديرون وسكرتارية، في الكل أو سنتر معين.' },
+  { value: 'all_owners_staff', label: '٣. أصحاب السناتر وموظفوها', description: 'يصل لأصحاب السناتر والموظفين النشطين في كل السناتر.' },
+  { value: 'all_owners_students', label: '٤. السناتر وطلابها كلها', description: 'رسالة لأصحاب السناتر وموظفيهم وكل الطلاب.' },
+  { value: 'all_students', label: '٥. الطلاب كلها فقط', description: 'لا تصل لأصحاب السناتر أو الموظفين.' },
+  { value: 'staff', label: '٦. موظفو السناتر', description: 'مدرسون ومديرون وسكرتارية، في الكل أو سنتر معين.' },
+  { value: 'all_project', label: '٧. كل حسابات المشروع', description: 'أصحاب السناتر وموظفوهم وطلابهم في كل مكان دفعة واحدة.' },
+];
+
+const presentations: { value: DeveloperBroadcastPresentation; label: string; description: string }[] = [
+  { value: 'notification', label: 'إشعار (جرس)', description: 'يظهر في عداد الجرس العادي دون مقاطعة.' },
+  { value: 'message', label: 'رسالة (صندوق الرسائل)', description: 'يظهر في عداد صندوق الرسائل المنفصل عن الجرس.' },
+  { value: 'urgent', label: 'تنبيه طارئ (نافذة فورية)', description: 'يفتح نافذة فورية للمستلم ويبقى في سجل الجرس أيضاً.' },
 ];
 
 export default function DevBroadcastScreen() {
@@ -32,6 +40,7 @@ export default function DevBroadcastScreen() {
   const [channel, setChannel] = useState<DeveloperBroadcastChannel>('center');
   const [centerId, setCenterId] = useState<string | null>(null);
   const [centerDelivery, setCenterDelivery] = useState<CenterBroadcastDelivery>('owners');
+  const [presentation, setPresentation] = useState<DeveloperBroadcastPresentation>('notification');
   const [staffScope, setStaffScope] = useState<StaffScope>('all_centers');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -55,15 +64,38 @@ export default function DevBroadcastScreen() {
   const selectedCenter = useMemo(() => centers.find((center) => center.id === centerId), [centers, centerId]);
   const recipients = useMemo(() => {
     const name = selectedCenter?.name ? `سنتر «${selectedCenter.name}»` : 'السنتر المختار';
-    if (channel === 'center') return centerDelivery === 'owners' ? `صاحب ${name} فقط` : `صاحب ${name} وطلابه`;
+    if (channel === 'center') {
+      const map: Record<CenterBroadcastDelivery, string> = {
+        owners: `صاحب ${name} فقط`,
+        owners_staff: `صاحب ${name} وموظفيه`,
+        owners_students: `صاحب ${name} وطلابه`,
+        owners_students_staff: `صاحب ${name} وموظفيه وطلابه`,
+        students: `طلاب ${name} فقط`,
+        staff: `موظفو ${name} فقط`,
+        everyone: `كل حسابات ${name}`,
+      };
+      return map[centerDelivery];
+    }
     if (channel === 'all_owners') return 'أصحاب كل السناتر';
-    if (channel === 'all_owners_students') return 'أصحاب كل السناتر وكل الطلاب';
+    if (channel === 'all_owners_staff') return 'أصحاب كل السناتر وموظفوها النشطون';
+    if (channel === 'all_owners_students') return 'أصحاب كل السناتر وموظفوها وكل الطلاب';
     if (channel === 'all_students') return 'كل الطلاب فقط';
+    if (channel === 'all_project') return 'كل حسابات المشروع: أصحاب السناتر وموظفوهم وطلابهم';
     return staffScope === 'all_centers' ? 'الموظفون النشطون في كل السناتر' : `الموظفون النشطون في ${name}`;
   }, [channel, centerDelivery, staffScope, selectedCenter]);
 
   if (!ready) return <GradientScreen><LoadingView message="جاري التحميل..." /></GradientScreen>;
   if (profile?.role !== 'super_admin') return <DeveloperGate />;
+
+  const centerDeliveryOptions: { value: CenterBroadcastDelivery; label: string }[] = [
+    { value: 'owners', label: 'صاحب السنتر فقط' },
+    { value: 'owners_staff', label: 'صاحب السنتر وموظفوه' },
+    { value: 'owners_students', label: 'صاحب السنتر وطلابه' },
+    { value: 'owners_students_staff', label: 'صاحب السنتر وموظفوه وطلابه' },
+    { value: 'staff', label: 'موظفو السنتر فقط' },
+    { value: 'students', label: 'طلاب السنتر فقط' },
+    { value: 'everyone', label: 'كل حسابات السنتر' },
+  ];
 
   const send = async () => {
     setFormError(null);
@@ -78,6 +110,7 @@ export default function DevBroadcastScreen() {
         body,
         centerId: needsCenter ? centerId : null,
         centerDelivery: channel === 'center' ? centerDelivery : null,
+        presentation,
       });
       setTitle(''); setBody('');
       Alert.alert('تم البث', `استهدف ${result.recipient_accounts} حساباً في ${result.centers} سنتر.`);
@@ -90,7 +123,7 @@ export default function DevBroadcastScreen() {
 
   return (
     <GradientScreen>
-      <BackHeader title="بث وإشعارات العملاء" subtitle="اختر واحدة من القنوات الخمس بدقة" />
+      <BackHeader title="بث وإشعارات العملاء" subtitle="اختر القناة وطريقة العرض بدقة" />
       {loading ? <LoadingView message="جاري تحميل السناتر..." /> : <KeyboardScreen>
         <Card>
           <SectionTitle title="قناة البث" />
@@ -115,9 +148,17 @@ export default function DevBroadcastScreen() {
 
           {channel === 'center' ? <OptionPicker
             label="مستلمو رسالة السنتر" icon="person" value={centerDelivery}
-            options={[{ value: 'owners', label: 'صاحب السنتر فقط' }, { value: 'owners_students', label: 'صاحب السنتر وطلابه' }]}
+            options={centerDeliveryOptions}
             onChange={(value) => setCenterDelivery(value as CenterBroadcastDelivery)}
           /> : null}
+
+          <SectionTitle title="طريقة العرض" />
+          <OptionPicker
+            label="يصل كـ" icon="notifications" value={presentation}
+            options={presentations.map(({ value, label }) => ({ value, label }))}
+            onChange={(value) => setPresentation(value as DeveloperBroadcastPresentation)}
+          />
+          <Text style={styles.description}>{presentations.find((item) => item.value === presentation)?.description}</Text>
 
           <View style={styles.recipientBox}><Text style={styles.recipientLabel}>المستلمون</Text><Text style={styles.recipientText}>{recipients}</Text></View>
           <AppInput label="العنوان" icon="text" placeholder="مثال: تحديث مهم الليلة" value={title} onChangeText={setTitle} maxLength={180} />

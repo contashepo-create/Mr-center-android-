@@ -12,7 +12,7 @@ import type {
   BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, FiscalYear, Grade, StaffInvite,
   ExamAnswer, ExamQuestion, ExamQuestionType, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
   PublishedExam, SessionRecord, Student, StudentAccount, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
-  DeveloperBroadcastChannel, CenterBroadcastDelivery, DeveloperBroadcastResult,
+  DeveloperBroadcastChannel, CenterBroadcastDelivery, DeveloperBroadcastPresentation, DeveloperBroadcastResult, CommunicationSummary,
 } from './types';
 
 // ------------------------------------------------------------
@@ -567,7 +567,7 @@ export async function fetchMyCenter(centerId: string): Promise<Center | null> {
 
 export async function fetchGrades(centerId: string): Promise<Grade[]> {
   const { data, error } = await getSupabase()
-    .from('grades').select('*').eq('center_id', centerId).order('created_at');
+    .from('grades').select('*').eq('center_id', centerId).order('sort_order').order('created_at');
   if (error) throw error;
   return (data ?? []) as Grade[];
 }
@@ -594,6 +594,24 @@ export async function deleteGrade(id: string): Promise<void> {
 export async function updateGrade(id: string, name: string): Promise<void> {
   const { error } = await getSupabase().from('grades').update({ name: name.trim() }).eq('id', id);
   if (error) throw error;
+}
+
+/** تحريك صف لأعلى/أسفل ضمن ترتيب المراحل */
+export async function moveGrade(id: string, dir: -1 | 1): Promise<void> {
+  const sb = getSupabase();
+  const { data: current } = await sb.from('grades').select('center_id, sort_order').eq('id', id).maybeSingle();
+  if (!current) return;
+  const order = current.sort_order;
+  const cmp = dir < 0 ? 'lt' : 'gt';
+  const { data: neighbor } = await sb.from('grades')
+    .select('id, sort_order').eq('center_id', current.center_id)
+    .neq('id', id)
+    .filter('sort_order', cmp, order)
+    .order('sort_order', { ascending: dir < 0 })
+    .limit(1).maybeSingle();
+  if (!neighbor) return;
+  await sb.from('grades').update({ sort_order: neighbor.sort_order }).eq('id', id);
+  await sb.from('grades').update({ sort_order: order }).eq('id', neighbor.id);
 }
 
 export async function fetchGroups(centerId: string): Promise<Group[]> {
@@ -1225,10 +1243,13 @@ export async function fetchMyInquiries(studentId: string): Promise<AppInquiry[]>
 
 export async function addInquiry(input: {
   centerId: string; studentId: string; kind: InquiryKind; subject: string; body: string;
+  fromGroupId?: string | null; toGroupId?: string | null;
 }): Promise<void> {
   const { error } = await getSupabase().from('app_inquiries').insert({
     id: uuid(), center_id: input.centerId, student_id: input.studentId,
     kind: input.kind, subject: input.subject.trim(), body: input.body.trim(),
+    from_group_id: input.kind === 'transfer' ? input.fromGroupId ?? null : null,
+    to_group_id: input.kind === 'transfer' ? input.toGroupId ?? null : null,
     status: 'pending', created_at: nowIso(), updated_at: nowIso(),
   });
   if (error) throw error;
@@ -1237,6 +1258,14 @@ export async function addInquiry(input: {
 export async function replyInquiry(id: string, reply: string, status: InquiryStatus): Promise<void> {
   const { error } = await getSupabase().from('app_inquiries')
     .update({ reply: reply.trim(), status, updated_at: nowIso() }).eq('id', id);
+  if (error) throw error;
+}
+
+/** قبول/رفض طلب نقل موثق؛ القبول يغيّر المجموعة الأساسية داخل RPC ذرية. */
+export async function resolveStudentTransfer(id: string, status: 'approved' | 'rejected', reply = ''): Promise<void> {
+  const { error } = await getSupabase().rpc('resolve_student_transfer', {
+    p_inquiry_id: id, p_status: status, p_reply: reply.trim() || null,
+  });
   if (error) throw error;
 }
 
@@ -1327,6 +1356,7 @@ export async function developerBroadcastNotification(input: {
   body: string;
   centerId?: string | null;
   centerDelivery?: CenterBroadcastDelivery | null;
+  presentation?: DeveloperBroadcastPresentation;
 }): Promise<DeveloperBroadcastResult> {
   const { data, error } = await getSupabase().rpc('developer_broadcast_notification', {
     p_channel: input.channel,
@@ -1334,9 +1364,20 @@ export async function developerBroadcastNotification(input: {
     p_body: input.body.trim(),
     p_center: input.centerId || null,
     p_center_delivery: input.centerDelivery || null,
+    p_presentation: input.presentation ?? 'notification',
   });
   if (error) throw error;
   return data as DeveloperBroadcastResult;
+}
+
+/** يحدث عدادات الشريط العلوي فور القراءة/الرد، من دون انتظار إعادة تحميل الشاشة. */
+const communicationListeners = new Set<() => void>();
+export function notifyCommunicationChanged(): void {
+  communicationListeners.forEach((fn) => fn());
+}
+export function subscribeCommunicationChanged(fn: () => void): () => void {
+  communicationListeners.add(fn);
+  return () => communicationListeners.delete(fn);
 }
 
 /** صندوق رسائل المطور المفلتر لصاحب السنتر أو الموظف النشط. */
@@ -1349,6 +1390,31 @@ export async function fetchMyDeveloperNotifications(): Promise<MyNotification[]>
 export async function markDeveloperNotificationRead(notificationId: string): Promise<void> {
   const { error } = await getSupabase().rpc('mark_developer_notification_read', { p_notification: notificationId });
   if (error) throw error;
+}
+
+/** ملخص عدادات ورسائل الشريط العلوي. لا يعيد إلا عناصر الحساب الحالي ومساراتها المناسبة. */
+export async function fetchMyCommunicationSummary(): Promise<CommunicationSummary> {
+  const { data, error } = await getSupabase().rpc('get_my_communication_summary');
+  if (error) throw error;
+  const raw = (data ?? {}) as Partial<CommunicationSummary>;
+  return {
+    notifications: { unread: Number(raw.notifications?.unread ?? 0), items: Array.isArray(raw.notifications?.items) ? raw.notifications.items : [] },
+    messages: { unread: Number(raw.messages?.unread ?? 0), items: Array.isArray(raw.messages?.items) ? raw.messages.items : [] },
+  };
+}
+
+/** تعليم أي إشعار ظاهر للحساب الحالي؛ يتحقق RPC من الدور والسنتر والجمهور. */
+export async function markMyCommunicationNotificationRead(notificationId: string): Promise<void> {
+  const { error } = await getSupabase().rpc('mark_my_communication_notification_read', { p_notification: notificationId });
+  if (error) throw error;
+  notifyCommunicationChanged();
+}
+
+/** تعليم رسائل الدعم الواردة للحساب الحالي كمقروءة عند فتح المحادثة. */
+export async function markMySupportMessagesRead(centerId?: string | null): Promise<void> {
+  const { error } = await getSupabase().rpc('mark_my_support_messages_read', { p_center: centerId ?? null });
+  if (error) throw error;
+  notifyCommunicationChanged();
 }
 
 export async function fetchNotifications(centerId: string): Promise<AppNotification[]> {
