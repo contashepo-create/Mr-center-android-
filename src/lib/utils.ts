@@ -346,6 +346,8 @@ export function arabicError(err: unknown): string {
   if (msg.includes('not_authenticated')) return 'تعذر إتمام التسجيل — سجّل دخولك أولاً ثم أعد المحاولة، وإن تكرر تواصل مع المطور';
   if (msg.includes('already_registered')) return 'هذا الحساب مسجل من قبل — سجّل دخولك مباشرة';
   if (msg.includes('invalid login')) return 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
+  if (msg.includes('login_rate_limited')) return 'محاولات دخول كثيرة — انتظر قليلاً ثم أعد المحاولة';
+  if (msg.includes('student_device_blocked')) return 'هذا الجهاز محجوب لهذا الطالب من إدارة السنتر';
   if (msg.includes('email not confirmed')) return 'بريدك غير مؤكد بعد — افتح رابط التأكيد المرسل إلى بريدك ثم سجّل دخولك';
   if (msg.includes('rate limit') || msg.includes('over_email_send_rate_limit')
     || msg.includes('over_request_rate_limit') || msg.includes('over_sms_send_rate_limit')

@@ -4,6 +4,8 @@
 // ============================================================
 
 import { getSupabase } from './supabase';
+import { getDeviceId } from './visitors';
+import { claimMySession } from './sessionGuard';
 import { nowIso, todayIso, uuid } from './utils';
 import type {
   Announcement, AppExam, AppInquiry, AppNotification, AppSurvey, AppSurveyResponse, Attendance, AttendanceStatus,
@@ -18,11 +20,27 @@ import type {
 // ------------------------------------------------------------
 
 export async function loginWithEmail(email: string, password: string) {
-  const { data, error } = await getSupabase().auth.signInWithPassword({
-    email: email.trim().toLowerCase(),
-    password,
-  });
-  if (error) throw error;
+  const normalized = email.trim().toLowerCase();
+  const device = await getDeviceId();
+  const sb = getSupabase();
+
+  // حماية خادمية من تخمين كلمات المرور: يمنع تجاوز الحد قبل محاولة الدخول
+  try {
+    await sb.rpc('check_login_allowed', { p_email: normalized, p_device: device || null });
+  } catch (e) {
+    // إن لم يكن الترحيل مطبقاً بعد نتجاهل الخطأ ولا نمنع الدخول
+    if (String((e as any)?.message ?? '').includes('login_rate_limited')) throw e;
+  }
+
+  const { data, error } = await sb.auth.signInWithPassword({ email: normalized, password });
+  if (error) {
+    try { await sb.rpc('record_login_attempt', { p_email: normalized, p_device: device || null, p_success: false }); } catch { /* تجاهل */ }
+    throw error;
+  }
+  try { await sb.rpc('record_login_attempt', { p_email: normalized, p_device: device || null, p_success: true }); } catch { /* تجاهل */ }
+
+  // جلسة واحدة لكل حساب: هذا الجهاز يستحوذ على الجلسة ويُخرج أي جهاز آخر
+  await claimMySession();
   return data;
 }
 
