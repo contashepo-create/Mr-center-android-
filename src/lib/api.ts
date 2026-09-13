@@ -408,6 +408,54 @@ export async function closeFiscalYear(year: number): Promise<void> {
   if (error) throw error;
 }
 
+/** إيراد أو مصروف يدوي عام (لا يشمل الرواتب/السلف/العمولات، ولها RPCs مخصصة) */
+export async function recordManualLedgerEntry(input: {
+  centerId: string; kind: 'income' | 'expense'; category: string; description?: string; amount: number; date?: string;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('record_manual_ledger_entry', {
+    p_center: input.centerId, p_kind: input.kind, p_category: input.category.trim(),
+    p_description: input.description?.trim() || '', p_amount: input.amount,
+    p_date: input.date || todayIso(),
+  });
+  if (error) throw error;
+}
+
+/** سلفة نقدية لموظف — لا تُحسب مصروف تشغيل حتى تُسوّى مع راتب */
+export async function recordStaffAdvance(input: {
+  centerId: string; employeeId: string; amount: number; date?: string; description?: string;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('record_staff_advance', {
+    p_center: input.centerId, p_employee: input.employeeId, p_amount: input.amount,
+    p_date: input.date || todayIso(), p_description: input.description?.trim() || '',
+  });
+  if (error) throw error;
+}
+
+/** صرف راتب موظف (أساسي + مكافأة + عمولة) بعد خصم سلفة/خصم معتمدين */
+export async function recordPayrollSettlement(input: {
+  centerId: string; employeeId: string; baseSalary: number; bonus?: number; commission?: number;
+  advanceApplied?: number; deduction?: number; date?: string; description?: string;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('record_payroll_settlement', {
+    p_center: input.centerId, p_employee: input.employeeId, p_base_salary: input.baseSalary,
+    p_bonus: input.bonus ?? 0, p_commission: input.commission ?? 0,
+    p_advance_applied: input.advanceApplied ?? 0, p_deduction: input.deduction ?? 0,
+    p_date: input.date || todayIso(), p_description: input.description?.trim() || '',
+  });
+  if (error) throw error;
+}
+
+/** صرف عمولة تحصيل منفصلة عن الراتب */
+export async function recordStaffCommissionPayment(input: {
+  centerId: string; employeeId: string; amount: number; date?: string; description?: string;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('record_staff_commission_payment', {
+    p_center: input.centerId, p_employee: input.employeeId, p_amount: input.amount,
+    p_date: input.date || todayIso(), p_description: input.description?.trim() || '',
+  });
+  if (error) throw error;
+}
+
 /** (المطور) دعوات فريق العمل — للعرض والسحب في شاشة الفريق */
 export async function devListInvites(centerId: string): Promise<StaffInvite[]> {
   const { data, error } = await getSupabase().from('staff_invites').select('id,center_id,code,name,phone,role,status,created_at')
@@ -681,28 +729,20 @@ export async function fetchDues(centerId: string, month: number, year: number): 
   return (data ?? []) as Due[];
 }
 
-/** توليد استحقاقات شهرية لكل طلاب مجموعة (يتجاوز الموجود مسبقاً) */
+/** توليد استحقاقات شهرية لكل طلاب مجموعة (يتجاوز الموجود مسبقاً) — خادمياً وذرياً عبر RPC */
 export async function generateDuesForGroup(
   centerId: string, group: Group, month: number, year: number,
 ): Promise<{ created: number; amount: number; skippedNoSessions: boolean }> {
-  const inGroup = await fetchGroupMembers(centerId, group.id);
-  if (inGroup.length === 0) return { created: 0, amount: 0, skippedNoSessions: false };
-  const amount = await dueAmountForGroup(centerId, group, month, year);
-  if (amount === null) return { created: 0, amount: 0, skippedNoSessions: true };
-  const existing = await fetchDues(centerId, month, year);
-  // طالب المجموعتين يستحق عن كل مجموعة على حدة (المفتاح طالب+مجموعة)
-  const existingKeys = new Set(existing.filter((d) => d.group_id === group.id).map((d) => d.student_id));
-  const rows = inGroup
-    .filter((s) => !existingKeys.has(s.id))
-    .map((s) => ({
-      id: uuid(), center_id: centerId, student_id: s.id, group_id: group.id,
-      month, year, amount, status: 'pending', created_at: nowIso(),
-    }));
-  if (rows.length > 0) {
-    const { error } = await getSupabase().from('dues').insert(rows);
-    if (error) throw error;
-  }
-  return { created: rows.length, amount, skippedNoSessions: false };
+  const { data, error } = await getSupabase().rpc('generate_manual_dues_for_group', {
+    p_center: centerId, p_group: group.id, p_month: month, p_year: year,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as { created?: number; amount?: number; skipped_no_sessions?: boolean };
+  return {
+    created: Number(result.created ?? 0),
+    amount: Number(result.amount ?? 0),
+    skippedNoSessions: Boolean(result.skipped_no_sessions),
+  };
 }
 
 /** مبلغ الاستحقاق حسب نظام التسعير — null إن كان بالحصة ولا حصص مسجلة بعد */
@@ -788,7 +828,7 @@ export async function fetchPaymentsForStudent(studentId: string): Promise<Paymen
 
 export async function fetchDuesForStudent(studentId: string): Promise<Due[]> {
   const { data, error } = await getSupabase().from('dues').select('*')
-    .eq('student_id', studentId).order('year', { ascending: false }).order('month', { ascending: false }).limit(60);
+    .eq('student_id', studentId).order('due_year', { ascending: false }).order('month', { ascending: false }).limit(60);
   if (error) throw error;
   return (data ?? []) as Due[];
 }
@@ -797,46 +837,70 @@ export async function recordPayment(input: {
   centerId: string; studentId: string; dueId?: string | null;
   amount: number; month: number; year: number; notes?: string;
 }): Promise<void> {
-  const sb = getSupabase();
-  const { data: authData } = await sb.auth.getUser();
-  const actorId = authData.user?.id ?? null;
-  const { data: actor } = actorId ? await sb.from('profiles').select('full_name').eq('id', actorId).maybeSingle() : { data: null };
+  const amount = Number(input.amount);
+  if (!amount || amount <= 0) throw new Error('invalid_payment_amount');
+  if (input.month < 1 || input.month > 12 || input.year < 2000) throw new Error('invalid_payment_period');
 
-  if (input.dueId) {
-    // استخدام RPC الذري للتحقق من المستحق وتخزين هوية المحصل
-    const { error } = await sb.rpc('record_payment', {
-      p_due_id: input.dueId,
-      p_amount: input.amount,
-      p_collected_by: actorId,
-      p_collected_by_name: actor?.full_name ?? '',
-    });
-    if (error) throw error;
-  } else {
-    // دفعة بدون مستحق (تسجيل يدوي)
-    const { error } = await sb.from('payments').insert({
-      id: uuid(), center_id: input.centerId, student_id: input.studentId,
-      collected_by: actorId, collected_by_name: actor?.full_name ?? '',
-      due_id: null, amount: input.amount,
-      payment_date: todayIso(), month: input.month, year: input.year,
-      notes: input.notes?.trim() || null, created_at: nowIso(),
-    });
-    if (error) throw error;
-  }
+  // التحصيل يتم خادمياً ذرياً عبر record_payment RPC:
+  // يقفل صف المستحق ويمنع السباق (Race Condition) وتجاوز المبلغ من جهازين في نفس اللحظة،
+  // ويطبق أي رصيد مقدم على المستحقات القائمة تلقائياً عند التحصيل بلا مستحق محدد.
+  const { error } = await getSupabase().rpc('record_payment', {
+    p_center: input.centerId,
+    p_student: input.studentId,
+    p_due: input.dueId ?? null,
+    p_amount: amount,
+    p_month: input.month,
+    p_year: input.year,
+    p_notes: input.notes?.trim() || null,
+  });
+  if (error) throw error;
+}
 
-  if (input.dueId) {
-    // تحديث حالة المستحق (paid/partial)
-    const { data: due } = await sb.from('dues').select('amount').eq('id', input.dueId).maybeSingle();
-    const { data: paidRows } = await sb.from('payments').select('amount').eq('due_id', input.dueId);
-    const totalPaid = (paidRows ?? []).reduce((s, r) => s + Number(r.amount), 0);
-    let status: string;
-    if (due && totalPaid >= Number(due.amount)) {
-      status = 'paid';
-    } else {
-      status = 'partial';
-    }
-    const { error: dueErr } = await sb.from('dues').update({ status }).eq('id', input.dueId);
-    if (dueErr) throw dueErr;
-  }
+/** تحصيل مقدم للطالب: يظهر رصيداً دائنًا ويُطبّق تلقائياً على مستحق قائم إن وجد. */
+export async function recordStudentCredit(input: {
+  centerId: string; studentId: string; amount: number; month: number; year: number; notes?: string;
+}): Promise<void> {
+  await recordPayment({ ...input, dueId: null });
+}
+
+/** تحصيل المستحقات المختارة من مجموعة في معاملة واحدة؛ الاختيار نفسه لا يحفظ شيئاً. */
+export async function recordBulkDuePayments(input: {
+  centerId: string; month: number; year: number; items: { dueId: string; amount: number }[]; notes?: string;
+}): Promise<{ count: number; total: number }> {
+  if (input.items.length === 0) throw new Error('اختر طالباً واحداً على الأقل.');
+  const { data, error } = await getSupabase().rpc('record_bulk_due_payments', {
+    p_center: input.centerId,
+    p_month: input.month,
+    p_year: input.year,
+    p_items: input.items.map((item) => ({ due_id: item.dueId, amount: item.amount })),
+    p_notes: input.notes?.trim() || null,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as { count?: number; total?: number };
+  return { count: Number(result.count ?? 0), total: Number(result.total ?? 0) };
+}
+
+/** كشف حساب طالب شامل: مستحقات مفتوحة + رصيد دائن متاح. */
+export interface StudentAccountDue { id: string; month: number; due_year: number; amount: number; cash_paid: number; remaining: number; status: string; }
+export interface StudentAccountCredit { available: number; }
+export interface StudentAccount { dues: StudentAccountDue[]; credit: number; totalRemaining: number; }
+export async function fetchStudentAccount(centerId: string, studentId: string): Promise<StudentAccount> {
+  const { data, error } = await getSupabase().rpc('get_student_account', { p_center: centerId, p_student: studentId });
+  if (error) throw error;
+  const result = (data ?? {}) as { dues?: StudentAccountDue[]; credit?: number };
+  const dues = (result.dues ?? []) as StudentAccountDue[];
+  return {
+    dues,
+    credit: Number(result.credit ?? 0),
+    totalRemaining: dues.reduce((sum, due) => sum + Number(due.remaining ?? 0), 0),
+  };
+}
+
+/** تسوية حساب الطالب: يطبق الرصيد الدائن المتاح على المستحقات القائمة يدوياً. */
+export async function settleStudentAccount(centerId: string, studentId: string): Promise<{ applied: number }> {
+  const { data, error } = await getSupabase().rpc('settle_student_account', { p_center: centerId, p_student: studentId });
+  if (error) throw error;
+  return { applied: Number((data as { applied?: number } | null)?.applied ?? 0) };
 }
 
 export async function updateStudentGroup(studentId: string, groupId: string | null, gradeId: string | null): Promise<void> {
@@ -928,7 +992,7 @@ export async function fetchAdminStats(centerId: string): Promise<AdminStats> {
     sb.from('dues').select('id', { count: 'exact', head: true })
       .eq('center_id', centerId).eq('status', 'pending'),
     sb.from('payments').select('amount')
-      .eq('center_id', centerId).eq('month', now.getMonth() + 1).eq('year', now.getFullYear()),
+      .eq('center_id', centerId).eq('month', now.getMonth() + 1).eq('payment_year', now.getFullYear()),
   ]);
   const { data: todaySessions } = await sb.from('sessions').select('id')
     .eq('center_id', centerId).eq('session_date', today);

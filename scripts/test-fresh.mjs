@@ -380,8 +380,8 @@ console.log('\n━━ عزل القراءة/الحفظ/الاسترجاع في �
     const body = api.slice(start, end);
     ok(`${fn}: تفلتر بـ center_id (عزل السناتر)`, body.includes('.eq(\'center_id\''));
   }
-  // كل إدراج يتضمن center_id
-  const insertFns = ['upsertGroup', 'upsertStudent', 'recordPayment', 'upsertAnnouncement',
+  // كل إدراج يتضمن center_id (recordPayment يمرر p_center إلى RPC ذرية تفرض العزل خادمياً)
+  const insertFns = ['upsertGroup', 'upsertStudent', 'upsertAnnouncement',
     'upsertExam', 'upsertSurvey', 'sendNotification', 'logActivity', 'createSubscriptionRequest'];
   for (const fn of insertFns) {
     const start = api.indexOf(`export async function ${fn}`);
@@ -389,10 +389,17 @@ console.log('\n━━ عزل القراءة/الحفظ/الاسترجاع في �
     const body = api.slice(start, end);
     ok(`${fn}: الكتابة موسومة بـ center_id`, body.includes('center_id'));
   }
+  {
+    const start = api.indexOf('export async function recordPayment');
+    const end = api.indexOf('\nexport ', start + 10);
+    const body = api.slice(start, end);
+    ok('recordPayment: الكتابة موسومة بـ center_id عبر p_center للـ RPC الذرية', body.includes('p_center') && body.includes("rpc('record_payment'"));
+  }
   // الحفظ والاسترجاع: upsert الحضور يدمج بالسجلات القائمة (لا تكرار)
   ok('saveAttendance يدمج مع القائم (قراءة قبل الكتابة)', api.includes('async function saveAttendance') && api.slice(api.indexOf('async function saveAttendance'), api.indexOf('async function saveAttendance') + 700).includes('fetchAttendanceForSession'));
   ok('getOrCreateSession لا يكرر الحصص', api.includes('getOrCreateSession') && api.slice(api.indexOf('async function getOrCreateSession'), api.indexOf('async function getOrCreateSession') + 600).includes('if (existing)'));
-  ok('الدفع الجزئي يُعلَّم partial (لا يضيع الباقي)', api.includes("status = 'partial'"));
+  ok('الدفع الجزئي يُعلَّم partial خادمياً عبر record_payment RPC (لا يضيع الباقي)',
+    api.includes("rpc('record_payment'") && (readFileSync(join(root, 'supabase/20260913_student_collections.sql'), 'utf8').includes("'partial'")));
   ok('سجل معاملات المالك موجود', api.includes('fetchSubscriptionsHistory'));
 }
 
