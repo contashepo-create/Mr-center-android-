@@ -27,6 +27,7 @@ import {
 } from '../../src/lib/utils';
 import { buildExamPaperHtml, fetchReportBranding, shareReportPdf } from '../../src/lib/report';
 import { ALL_ORNAMENTS, ornamentsForSubject, subjectLabelFor } from '../../src/lib/exam-ornaments';
+import { OrnamentStampEditor } from '../../src/components/ornament-stamp-editor';
 import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
 const DELIVERY_OPTIONS: { value: ExamDeliveryMode; label: string }[] = [
@@ -672,32 +673,61 @@ export default function ExamsScreen() {
                       />
                     </View>
                   </View>
-                  <AppButton
-                    title={`تعبئة حسب المادة (${subjectLabelFor(subject)})`}
-                    icon="color-palette"
-                    small
-                    variant="outline"
-                    onPress={() => setOrnaments((o) => ({ ...o, kinds: ornamentsForSubject(subject).map((orn) => orn.kind) }))}
-                  />
-                  <View style={{ height: spacing.sm }} />
-                  <Text style={[styles.pubRowText, { marginBottom: spacing.sm }]}>اختر عناصر الزخرفة (اختياري — فارغ = طقم المادة تلقائياً)</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.md }}>
-                    {ALL_ORNAMENTS.map((orn) => {
-                      const active = ornaments.kinds.includes(orn.kind);
-                      return (
-                        <Pressable
-                          key={orn.kind}
-                          style={[styles.stampChip, active && { backgroundColor: colors.successBg, borderColor: colors.success }]}
-                          onPress={() => setOrnaments((o) => ({
-                            ...o,
-                            kinds: active ? o.kinds.filter((k) => k !== orn.kind) : [...o.kinds, orn.kind],
-                          }))}
-                        >
-                          <Text style={styles.stampChipText}>{orn.glyph}</Text>
-                        </Pressable>
-                      );
-                    })}
+
+                  <View style={styles.opacityRow}>
+                    <Text style={styles.pubRowText}>شفافية الزخارف: {Math.round(ornaments.opacity * 100)}%</Text>
+                    <View style={styles.editButtons}>
+                      <Pressable
+                        style={styles.stepBtn}
+                        onPress={() => setOrnaments((o) => ({ ...o, opacity: Math.max(0.02, Math.round((o.opacity - 0.05) * 100) / 100) }))}
+                      >
+                        <Ionicons name="remove" size={16} color={colors.text} />
+                      </Pressable>
+                      <Pressable
+                        style={styles.stepBtn}
+                        onPress={() => setOrnaments((o) => ({ ...o, opacity: Math.min(0.6, Math.round((o.opacity + 0.05) * 100) / 100) }))}
+                      >
+                        <Ionicons name="add" size={16} color={colors.text} />
+                      </Pressable>
+                    </View>
                   </View>
+
+                  {ornaments.placement === 'manual' ? (
+                    <OrnamentStampEditor
+                      stamps={ornaments.stamps}
+                      opacity={ornaments.opacity}
+                      onChangeStamps={(stamps) => setOrnaments((o) => ({ ...o, stamps }))}
+                    />
+                  ) : (
+                    <>
+                      <AppButton
+                        title={`تعبئة حسب المادة (${subjectLabelFor(subject)})`}
+                        icon="color-palette"
+                        small
+                        variant="outline"
+                        onPress={() => setOrnaments((o) => ({ ...o, kinds: ornamentsForSubject(subject).map((orn) => orn.kind) }))}
+                      />
+                      <View style={{ height: spacing.sm }} />
+                      <Text style={[styles.pubRowText, { marginBottom: spacing.sm }]}>اختر عناصر الزخرفة (اختياري — فارغ = طقم المادة تلقائياً)</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.md }}>
+                        {ALL_ORNAMENTS.map((orn) => {
+                          const active = ornaments.kinds.includes(orn.kind);
+                          return (
+                            <Pressable
+                              key={orn.kind}
+                              style={[styles.stampChip, active && { backgroundColor: colors.successBg, borderColor: colors.success }]}
+                              onPress={() => setOrnaments((o) => ({
+                                ...o,
+                                kinds: active ? o.kinds.filter((k) => k !== orn.kind) : [...o.kinds, orn.kind],
+                              }))}
+                            >
+                              <Text style={styles.stampChipText}>{orn.glyph}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </>
+                  )}
                 </>
               )}
 
@@ -1147,6 +1177,15 @@ const styles = themedStyles(() => StyleSheet.create({
     backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
   },
   stampChipText: { fontSize: font.md },
+  opacityRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: spacing.sm, marginBottom: spacing.md,
+  },
+  editButtons: { flexDirection: 'row', gap: spacing.xs },
+  stepBtn: {
+    width: 32, height: 32, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+  },
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.md },
   typeChip: {
     width: '48.5%', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
