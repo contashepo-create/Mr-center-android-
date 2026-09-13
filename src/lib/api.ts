@@ -11,7 +11,7 @@ import type {
   Announcement, AppExam, AppInquiry, AppNotification, AppSurvey, AppSurveyResponse, Attendance, AttendanceStatus,
   BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, FiscalYear, Grade, StaffInvite,
   ExamAnswer, ExamQuestion, ExamQuestionType, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
-  PublishedExam, SessionRecord, Student, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
+  PublishedExam, SessionRecord, Student, StudentAccount, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
   DeveloperBroadcastChannel, CenterBroadcastDelivery, DeveloperBroadcastResult,
 } from './types';
 
@@ -617,6 +617,8 @@ export async function upsertGroup(centerId: string, group: Partial<Group> & { na
     billing_type: group.billing_type ?? 'monthly',
     weekly_price: group.weekly_price ?? 0,
     session_price: group.session_price ?? 0,
+    due_mode: group.due_mode ?? 'manual',
+    attendance_due_amount: group.attendance_due_amount ?? 0,
   };
   if (group.id) {
     const { error } = await getSupabase().from('groups').update(payload).eq('id', group.id);
@@ -734,8 +736,13 @@ export async function saveAttendance(
     created_at: byStudent.get(r.student_id)?.created_at ?? nowIso(),
   }));
   if (upserts.length === 0) return;
-  const { error } = await getSupabase().from('attendance').upsert(upserts);
+  const sb = getSupabase();
+  const { error } = await sb.from('attendance').upsert(upserts);
   if (error) throw error;
+  // الدالة خادمية وidempotent: لا تنشئ مستحقين للحصة نفسها لمجموعات الاستحقاق
+  // بالحضور، وتطبق الرصيد المقدم تلقائياً. لا تأثير على مجموعات الاستحقاق اليدوي.
+  const { error: duesError } = await sb.rpc('sync_attendance_dues_for_session', { p_center: centerId, p_session: sessionId });
+  if (duesError) throw duesError;
 }
 
 // ---------- المدفوعات والمستحقات ----------
@@ -898,27 +905,23 @@ export async function recordBulkDuePayments(input: {
   return { count: Number(result.count ?? 0), total: Number(result.total ?? 0) };
 }
 
-/** كشف حساب طالب شامل: مستحقات مفتوحة + رصيد دائن متاح. */
-export interface StudentAccountDue { id: string; month: number; due_year: number; amount: number; cash_paid: number; remaining: number; status: string; }
-export interface StudentAccountCredit { available: number; }
-export interface StudentAccount { dues: StudentAccountDue[]; credit: number; totalRemaining: number; }
+/** كشف حساب طالب شامل: مستحقات + رصيد دائن + تسويات سابقة. */
 export async function fetchStudentAccount(centerId: string, studentId: string): Promise<StudentAccount> {
   const { data, error } = await getSupabase().rpc('get_student_account', { p_center: centerId, p_student: studentId });
   if (error) throw error;
-  const result = (data ?? {}) as { dues?: StudentAccountDue[]; credit?: number };
-  const dues = (result.dues ?? []) as StudentAccountDue[];
-  return {
-    dues,
-    credit: Number(result.credit ?? 0),
-    totalRemaining: dues.reduce((sum, due) => sum + Number(due.remaining ?? 0), 0),
-  };
+  return data as StudentAccount;
 }
 
-/** تسوية حساب الطالب: يطبق الرصيد الدائن المتاح على المستحقات القائمة يدوياً. */
-export async function settleStudentAccount(centerId: string, studentId: string): Promise<{ applied: number }> {
-  const { data, error } = await getSupabase().rpc('settle_student_account', { p_center: centerId, p_student: studentId });
+/** تسوية حساب الطالب إلى صفر: يصفّر الرصيد الدائن والمديونية دون تسجيل دفعة/إيراد جديد. */
+export async function settleStudentAccount(
+  centerId: string, studentId: string, notes?: string,
+): Promise<{ creditSettled: number; debtSettled: number }> {
+  const { data, error } = await getSupabase().rpc('settle_student_account', {
+    p_center: centerId, p_student: studentId, p_notes: notes?.trim() || null,
+  });
   if (error) throw error;
-  return { applied: Number((data as { applied?: number } | null)?.applied ?? 0) };
+  const result = (data ?? {}) as { credit_settled?: number; debt_settled?: number };
+  return { creditSettled: Number(result.credit_settled ?? 0), debtSettled: Number(result.debt_settled ?? 0) };
 }
 
 export async function updateStudentGroup(studentId: string, groupId: string | null, gradeId: string | null): Promise<void> {

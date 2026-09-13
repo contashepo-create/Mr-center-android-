@@ -85,6 +85,8 @@ export interface Group {
   weekly_price: number;
   session_price: number;
   students_count: number;
+  due_mode?: 'manual' | 'attendance';
+  attendance_due_amount?: number;
 }
 
 export interface Student {
@@ -111,6 +113,8 @@ export interface Due {
   due_year: number;
   amount: number;
   status: 'pending' | 'paid' | 'partial';
+  due_source?: 'manual' | 'attendance';
+  session_id?: string | null;
   created_at: string;
 }
 
@@ -124,7 +128,43 @@ export interface Payment {
   month: number;
   payment_year: number;
   notes: string | null;
+  payment_kind?: 'due_payment' | 'credit';
   created_at: string;
+}
+
+export interface StudentAccountDue {
+  id: string;
+  group_id: string | null;
+  month: number;
+  due_year: number;
+  amount: number;
+  cash_paid: number;
+  credit_applied: number;
+  settled_amount: number;
+  remaining: number;
+  status: 'pending' | 'paid' | 'partial';
+  due_source: 'manual' | 'attendance';
+  session_id: string | null;
+  created_at: string;
+}
+
+export interface StudentAccountCredit {
+  id: string;
+  amount: number;
+  remaining: number;
+  applied_to_dues: number;
+  settled_amount: number;
+  payment_date: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface StudentAccount {
+  student: Pick<Student, 'id' | 'name' | 'phone' | 'guardian_phone'>;
+  summary: { credit_balance: number; amount_due: number; net_balance: number };
+  dues: StudentAccountDue[];
+  credits: StudentAccountCredit[];
+  settlements: { amount: number; notes: string | null; created_at: string; kind: 'debt_settlement' }[];
 }
 
 export interface SessionRecord {
