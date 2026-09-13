@@ -245,6 +245,20 @@ export interface FiscalYear {
   closed_at: string | null;
 }
 
+/** خصم معلّق على موظف — التزام حتى يُسوّى (كلياً أو جزئياً) عند صرف راتبه */
+export interface StaffDeduction {
+  id: string;
+  center_id: string;
+  staff_id: string;
+  amount: number;
+  applied_amount: number;
+  reason: string;
+  notes: string;
+  occurred_on: string;
+  status: 'open' | 'partial' | 'settled';
+  created_at: string;
+}
+
 export interface StaffInviteRow {
   id: string;
   center_id: string;

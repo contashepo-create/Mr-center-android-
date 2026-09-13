@@ -10,7 +10,7 @@ import { nowIso, todayIso, uuid } from './utils';
 import { brandForCenter, DEFAULT_CENTER_PRINT_SETTINGS, normalizeCenterPrintSettings, type CenterPrintBranding } from './printing';
 import type {
   Announcement, AppExam, AppInquiry, AppNotification, AppSurvey, AppSurveyResponse, Attendance, AttendanceStatus,
-  BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, FiscalYear, Grade, StaffInviteRow,
+  BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, FiscalYear, Grade, StaffDeduction, StaffInviteRow,
   ExamAnswer, ExamQuestion, ExamQuestionType, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
   PublishedExam, SessionRecord, Student, StudentAccount, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
   DeveloperBroadcastChannel, CenterBroadcastDelivery, DeveloperBroadcastPresentation, DeveloperBroadcastResult, CommunicationSummary,
@@ -472,6 +472,72 @@ export async function recordStaffCommissionPayment(input: {
   const { error } = await getSupabase().rpc('record_staff_commission_payment', {
     p_center: input.centerId, p_employee: input.employeeId, p_amount: input.amount,
     p_date: input.date || todayIso(), p_description: input.description?.trim() || '',
+  });
+  if (error) throw error;
+}
+
+/** خصومات موظف معلّقة (لم تُسدَّد كلياً بعد) — تُعرض ليختار المسئول ما يطبّقه عند صرف الراتب */
+export async function fetchStaffDeductions(centerId: string): Promise<StaffDeduction[]> {
+  const { data, error } = await getSupabase().from('staff_deductions').select('*')
+    .eq('center_id', centerId).order('occurred_on', { ascending: false }).order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as StaffDeduction[];
+}
+
+/** تسجيل خصم جديد معلّق على موظف — التزام لا يُخصم من الدفتر إلا عند صرف راتبه */
+export async function recordStaffDeduction(input: {
+  centerId: string; employeeId: string; amount: number; reason: string; date?: string; notes?: string;
+}): Promise<string> {
+  const { data, error } = await getSupabase().rpc('record_staff_deduction', {
+    p_center: input.centerId, p_employee: input.employeeId, p_amount: input.amount,
+    p_reason: input.reason.trim(), p_date: input.date || todayIso(), p_notes: input.notes?.trim() || '',
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+/** تعديل خصم موظف قائم — لا يقبل تخفيض المبلغ عن الجزء المسدَّد فعلاً (يتحقق منه الخادم) */
+export async function amendStaffDeduction(input: {
+  deductionId: string; amount: number; reason: string; notes?: string; date: string;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('amend_staff_deduction', {
+    p_deduction: input.deductionId, p_amount: input.amount, p_reason: input.reason.trim(),
+    p_notes: input.notes?.trim() || '', p_date: input.date,
+  });
+  if (error) throw error;
+}
+
+/**
+ * صرف راتب موظف مع اختيار سلف/خصومات محددة بالمعرف (نسخة كاملة من RPC صرف الراتب
+ * تطابق تماماً منطق الويب — تسمح باختيار أي مجموعة سلف/خصومات معلّقة وتسويتها ذرّياً
+ * ضمن نفس معاملة صرف الراتب، بخلاف recordPayrollSettlement المبسّطة أعلاه).
+ */
+export async function recordSalaryPayment(input: {
+  centerId: string; employeeId: string; baseSalary: number; bonus?: number; commission?: number;
+  advanceApplied?: number; deductionApplied?: number; deductionIds?: string[]; date?: string; description?: string;
+}): Promise<string> {
+  const { data, error } = await getSupabase().rpc('record_salary_payment', {
+    p_center: input.centerId, p_employee: input.employeeId, p_base_salary: input.baseSalary,
+    p_bonus: input.bonus ?? 0, p_commission: input.commission ?? 0,
+    p_advance_applied: input.advanceApplied ?? 0, p_deduction_applied: input.deductionApplied ?? 0,
+    p_deduction_ids: input.deductionIds ?? [], p_date: input.date || todayIso(),
+    p_description: input.description?.trim() || '',
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+/**
+ * تصحيح قيد دفتر أُدخل يدوياً (تاريخ/تصنيف/بيان/مبلغ). تحصيل الطالب لا يُعدَّل هنا
+ * (يعدَّل من شاشة التحصيل بمصدره الأصلي)، وصرف الراتب لا يقبل تغيير المبلغ لارتباطه
+ * بسلف وخصومات مسوّاة — مرر p_amount بقيمة null في هذه الحالة (يتحقق منها الخادم أيضاً).
+ */
+export async function amendAccountingLedgerEntry(input: {
+  entryId: string; date: string; category: string; description: string; amount: number | null;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('amend_accounting_ledger_entry', {
+    p_entry: input.entryId, p_date: input.date, p_category: input.category.trim(),
+    p_description: input.description.trim(), p_amount: input.amount,
   });
   if (error) throw error;
 }

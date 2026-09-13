@@ -410,6 +410,11 @@ export function arabicError(err: unknown): string {
   if (msg.includes('salary_amount_requires_reversal')) return 'لا يمكن تغيير مبلغ راتب صُرف من الدفتر لأنه مرتبط بسلف وخصومات؛ سجل تصحيحاً/عكساً موثقاً';
   if (msg.includes('advance_edit_below_applied')) return 'لا يمكن تخفيض السلفة عن الجزء الذي خُصم فعلاً من رواتب سابقة';
   if (msg.includes('invalid_staff_deduction_edit')) return 'لا يمكن تخفيض الخصم عن الجزء الذي عولج بالفعل؛ تحقق من المبلغ والسبب والتاريخ';
+  if (msg.includes('invalid_staff_deduction')) return 'أدخل سبباً ومبلغ خصم صحيحاً أكبر من صفر';
+  if (msg.includes('deduction_exceeds_selected_balance')) return 'المبلغ المعتمد أكبر من رصيد الخصومات المحددة';
+  if (msg.includes('deduction_source_allocation_failed')) return 'تعذر توزيع الخصم على مصادره — حاول مرة أخرى';
+  if (msg.includes('deduction_not_found')) return 'الخصم المحدد غير موجود أو تم حذفه';
+  if (msg.includes('ledger_entry_not_found')) return 'القيد المحدد غير موجود أو تم حذفه';
   if (msg.includes('custody_resolution_exceeds_shortage')) return 'لا يمكن خفض مبلغ التسليم بعد تسوية جزء من العجز';
   if (msg.includes('invalid_salary_amount')) return 'أدخل راتباً أساسياً صحيحاً أكبر من صفر';
   if (msg.includes('invalid_commission_amount')) return 'أدخل مبلغ عمولة صحيحاً أكبر من صفر';
