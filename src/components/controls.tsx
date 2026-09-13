@@ -277,6 +277,59 @@ export function LoadingView({ message }: { message?: string }) {
   );
 }
 
+// ------------------------------------------------------------
+// عداد رقمي (+/-) — بديل شرائح التمرير غير المتوفرة في مكتبات RN المثبتة
+// ------------------------------------------------------------
+
+export function NumberStepper({
+  label, value, min, max, step = 1, suffix = '', disabled = false, onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  suffix?: string;
+  disabled?: boolean;
+  onChange: (next: number) => void;
+}) {
+  const clamp = (n: number) => Math.max(min, Math.min(max, n));
+  return (
+    <View style={[stepperStyles.row, disabled && { opacity: 0.5 }]}>
+      <Text style={stepperStyles.label}>{label}: {value}{suffix}</Text>
+      <View style={stepperStyles.buttons}>
+        <Pressable
+          disabled={disabled}
+          style={stepperStyles.btn}
+          onPress={() => onChange(clamp(Math.round((value - step) * 100) / 100))}
+        >
+          <Ionicons name="remove" size={16} color={colors.text} />
+        </Pressable>
+        <Pressable
+          disabled={disabled}
+          style={stepperStyles.btn}
+          onPress={() => onChange(clamp(Math.round((value + step) * 100) / 100))}
+        >
+          <Ionicons name="add" size={16} color={colors.text} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const stepperStyles = themedStyles(() => StyleSheet.create({
+  row: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: spacing.sm, marginBottom: spacing.md,
+  },
+  label: { color: colors.text, fontSize: font.sm, fontWeight: '700', flex: 1, textAlign: 'right' },
+  buttons: { flexDirection: 'row', gap: spacing.xs },
+  btn: {
+    width: 32, height: 32, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+  },
+}));
+
 const styles = themedStyles(() => StyleSheet.create({
   sheetHandle: {
     width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong,
