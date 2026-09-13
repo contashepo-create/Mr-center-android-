@@ -6,12 +6,24 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import React, { useEffect, useState } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
-import { AppButton, Card, LoadingView } from '../src/components/controls';
+import { AppButton, AppInput, Card, LoadingView } from '../src/components/controls';
 import { BackHeader, GradientScreen, KeyboardScreen } from '../src/components/layout';
+import { FormMessage, OptionPicker } from '../src/components/pickers';
 import { ThemeToggleRow } from '../src/components/ThemeToggle';
+import { lookupComplaint, submitComplaint, type ComplaintLookup } from '../src/lib/complaints';
 import { fetchPublicConfig } from '../src/lib/supabase';
 import type { PublicConfig } from '../src/lib/types';
+import { arabicError, isValidPhone, normalizePhone } from '../src/lib/utils';
 import { colors, font, radius, spacing, themedStyles } from '../src/theme';
+
+const COMPLAINT_SUBJECTS = ['مشكلة تقنية', 'اقتراح تحسين', 'شكوى من خدمة', 'استفسار عام', 'أخرى'];
+
+function complaintStatusLabel(status?: string): { text: string; color: string } {
+  if (status === 'open') return { text: 'قيد المراجعة', color: colors.warning };
+  if (status === 'in_progress') return { text: 'جارٍ المعالجة', color: colors.info };
+  if (status === 'closed') return { text: 'تمت المعالجة', color: colors.success };
+  return { text: status ?? '—', color: colors.textMuted };
+}
 
 const APP_FEATURES: { icon: keyof typeof Ionicons.glyphMap; title: string; sub: string }[] = [
   { icon: 'people', title: 'إدارة الطلاب', sub: 'تسجيل وبحث وفلاتر (نشط/موقوف/مؤرشف) وملف شامل لكل طالب' },
@@ -45,6 +57,53 @@ export default function AboutScreen() {
   }, []);
 
   const version = Constants.expoConfig?.version ?? '1.0.0';
+
+  // قسم الشكاوي والاقتراحات — متاح للزوار بلا تسجيل
+  const [cName, setCName] = useState('');
+  const [cPhone, setCPhone] = useState('');
+  const [cSubject, setCSubject] = useState(COMPLAINT_SUBJECTS[0]);
+  const [cBody, setCBody] = useState('');
+  const [cBusy, setCBusy] = useState(false);
+  const [cError, setCError] = useState<string | null>(null);
+  const [cTicket, setCTicket] = useState<string | null>(null);
+
+  const submitComplaintForm = async () => {
+    setCError(null); setCTicket(null);
+    if (!isValidPhone(cPhone)) return setCError('أدخل رقم هاتف صحيحاً (8 إلى 15 رقماً) لتتمكن من تتبع شكواك.');
+    if (!cBody.trim()) return setCError('اكتب نص الشكوى أو الاقتراح أولاً.');
+    setCBusy(true);
+    try {
+      const ticket = await submitComplaint({ phone: normalizePhone(cPhone), name: cName, subject: cSubject, body: cBody });
+      setCTicket(ticket);
+      setCBody('');
+    } catch (e) {
+      setCError(arabicError(e));
+    } finally {
+      setCBusy(false);
+    }
+  };
+
+  const [tPhone, setTPhone] = useState('');
+  const [tTicket, setTTicket] = useState('');
+  const [tBusy, setTBusy] = useState(false);
+  const [tError, setTError] = useState<string | null>(null);
+  const [tResult, setTResult] = useState<ComplaintLookup | null>(null);
+
+  const trackComplaint = async () => {
+    setTError(null); setTResult(null);
+    if (!isValidPhone(tPhone)) return setTError('أدخل رقم الهاتف المسجل في الشكوى.');
+    if (!tTicket.trim()) return setTError('أدخل رقم الشكوى.');
+    setTBusy(true);
+    try {
+      const result = await lookupComplaint(tPhone, tTicket);
+      setTResult(result);
+      if (!result.found) setTError('لم نجد شكوى بهذا الرقم والهاتف — تأكد من صحتهما.');
+    } catch (e) {
+      setTError(arabicError(e));
+    } finally {
+      setTBusy(false);
+    }
+  };
 
   return (
     <GradientScreen>
@@ -123,6 +182,87 @@ export default function AboutScreen() {
               </Card>
             ) : null}
 
+            <Card style={{ marginTop: spacing.md }}>
+              <Text style={styles.contactTitle}>الشكاوي والاقتراحات</Text>
+              <Text style={styles.featSub}>
+                واجهت مشكلة أو لديك اقتراح؟ أرسله من هنا — متاح للجميع حتى بلا تسجيل دخول.
+                بعد الإرسال ستحصل على رقم شكوى، احتفظ به لتتبع حالتها لاحقاً.
+              </Text>
+              <View style={{ marginTop: spacing.md }}>
+                <AppInput label="الاسم (اختياري)" icon="person" placeholder="اسمك" value={cName} onChangeText={setCName} />
+                <AppInput
+                  label="رقم الهاتف"
+                  icon="call"
+                  placeholder="01xxxxxxxxx"
+                  value={cPhone}
+                  onChangeText={setCPhone}
+                  keyboardType="phone-pad"
+                  textAlign="left"
+                  style={{ writingDirection: 'ltr' }}
+                />
+                <OptionPicker
+                  label="الموضوع"
+                  icon="pricetag"
+                  value={cSubject}
+                  options={COMPLAINT_SUBJECTS.map((s) => ({ value: s, label: s }))}
+                  onChange={(v) => setCSubject(v ?? COMPLAINT_SUBJECTS[0])}
+                />
+                <AppInput
+                  label="نص الشكوى أو الاقتراح"
+                  icon="chatbubble-ellipses"
+                  placeholder="اكتب التفاصيل هنا..."
+                  value={cBody}
+                  onChangeText={setCBody}
+                  multiline
+                  numberOfLines={4}
+                  style={{ minHeight: 96, textAlignVertical: 'top' }}
+                />
+                <FormMessage type="error" text={cError} />
+                {cTicket ? (
+                  <FormMessage type="success" text={`تم استلام شكواك — رقم التتبع: ${cTicket}. احتفظ به جيداً.`} />
+                ) : null}
+                <AppButton title="إرسال" icon="send" small onPress={submitComplaintForm} loading={cBusy} />
+              </View>
+
+              <View style={{ height: spacing.lg }} />
+              <Text style={styles.contactTitle}>تتبع شكوى سابقة</Text>
+              <View style={{ marginTop: spacing.md }}>
+                <AppInput
+                  label="رقم الهاتف المسجل بالشكوى"
+                  icon="call"
+                  placeholder="01xxxxxxxxx"
+                  value={tPhone}
+                  onChangeText={setTPhone}
+                  keyboardType="phone-pad"
+                  textAlign="left"
+                  style={{ writingDirection: 'ltr' }}
+                />
+                <AppInput
+                  label="رقم الشكوى (مثال: MR-26-000123)"
+                  icon="ticket"
+                  placeholder="MR-26-000123"
+                  value={tTicket}
+                  onChangeText={setTTicket}
+                  autoCapitalize="characters"
+                  textAlign="left"
+                  style={{ writingDirection: 'ltr' }}
+                />
+                <FormMessage type="error" text={tError} />
+                {tResult?.found ? (
+                  <View style={styles.trackResult}>
+                    <Text style={styles.trackRow}>الموضوع: {tResult.subject ?? '—'}</Text>
+                    <View style={styles.trackStatusRow}>
+                      <Text style={styles.trackRow}>الحالة:</Text>
+                      <Text style={[styles.trackStatus, { color: complaintStatusLabel(tResult.status).color }]}>
+                        {complaintStatusLabel(tResult.status).text}
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+                <AppButton title="بحث" icon="search" variant="outline" small onPress={trackComplaint} loading={tBusy} />
+              </View>
+            </Card>
+
             <Text style={styles.copyright}>
               نظام متعدد السناتر بعزل كامل للبيانات — جميع الحقوق محفوظة © {new Date().getFullYear()}
             </Text>
@@ -157,4 +297,11 @@ const styles = themedStyles(() => StyleSheet.create({
     color: colors.textMuted, fontSize: font.xs, textAlign: 'center',
     marginTop: spacing.xxl, lineHeight: 18,
   },
+  trackResult: {
+    backgroundColor: colors.successBg, borderRadius: radius.md, padding: spacing.md,
+    marginBottom: spacing.md, gap: spacing.xs,
+  },
+  trackRow: { color: colors.text, fontSize: font.sm, fontWeight: '700', textAlign: 'right' },
+  trackStatusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  trackStatus: { fontSize: font.sm, fontWeight: '900' },
 }));

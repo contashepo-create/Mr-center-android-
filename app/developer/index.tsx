@@ -131,6 +131,14 @@ export default function DeveloperHome() {
           onPress={() => router.push('/developer/broadcast')}
         />
 
+        <ListItem
+          title="الشكاوي والاقتراحات"
+          subtitle="شكاوي الزوار من صفحة «حول التطبيق» — متابعة الحالة"
+          icon="alert-circle"
+          iconColor={colors.warning}
+          onPress={() => router.push('/developer/complaints')}
+        />
+
         <SectionTitle title="حسابك" />
         <ListItem title="تسجيل خروج المطور" icon="log-out" iconColor={colors.danger} onPress={confirmSignOut} />
       </KeyboardScreen>

@@ -1550,6 +1550,27 @@ export async function devSendSupportMessage(centerId: string, body: string): Pro
   if (error) throw error;
 }
 
+// ------------------------------------------------------------
+// الشكاوي العامة (المطور فقط) — نموذج الزوار في app/about.tsx
+// ------------------------------------------------------------
+
+export interface ComplaintRow {
+  id: string; ticket_no: string; phone: string; name: string | null;
+  subject: string; body: string; status: 'open' | 'in_progress' | 'closed';
+  device_id: string | null; created_at: string;
+}
+
+export async function devListComplaints(): Promise<ComplaintRow[]> {
+  const { data, error } = await getSupabase().rpc('dev_list_complaints');
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as ComplaintRow[];
+}
+
+export async function devUpdateComplaint(id: string, status: 'open' | 'in_progress' | 'closed'): Promise<void> {
+  const { error } = await getSupabase().rpc('dev_update_complaint', { p_id: id, p_status: status });
+  if (error) throw error;
+}
+
 export async function markNotificationRead(centerId: string, notificationId: string, studentId: string): Promise<void> {
   const { error } = await getSupabase().from('app_notification_reads').insert({
     id: uuid(), center_id: centerId, notification_id: notificationId, student_id: studentId,
