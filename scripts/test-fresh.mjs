@@ -68,7 +68,7 @@ console.log('\n━━ الباقات الاحترافية (متطلبات الم
   eq('متوسط: سنوي 4500', med.durations.find((d) => d.months === 12)?.price, 4500);
   eq('متوسط: سنتان 8500', med.durations.find((d) => d.months === 24)?.price, 8500);
   eq('متوسط: بلا مدير · سكرتير 1 · مدرس 2', [med.managers, med.secretaries, med.teachers], [0, 1, 2]);
-  eq('متوسط: طلاب غير محدود', med.maxStudents, null);
+  eq('متوسط: حتى 300 طالب (مطابق لسقف RPC الخادمي)', med.maxStudents, 300);
 
   eq('خصوصي: شهري 300', solo.durations.find((d) => d.months === 1)?.price, 300);
   eq('خصوصي: سنوي 3000', solo.durations.find((d) => d.months === 12)?.price, 3000);

@@ -35,8 +35,9 @@ export const PRODUCTS: PlanProduct[] = [
       { months: 12, label: 'سنوي', price: 6500 },
       { months: 24, label: 'سنتان', price: 12000 },
     ],
+    // المدير هو صاحب السنتر دائماً — بلا مدير مضاف في أي باقة
     managers: 0, secretaries: 2, teachers: 4, maxStudents: null,
-    features: ['كل الصلاحيات', 'مدير + 2 سكرتير + 4 مدرسين', 'طلاب غير محدود', 'تقارير PDF', 'إشعارات وواتساب'],
+    features: ['كل الصلاحيات', 'حتى 4 مدرسين + 2 سكرتارية', 'طلاب غير محدود', 'المحاسبة والعهدة والرواتب', 'تقارير PDF متقدمة', 'إشعارات وواتساب'],
   },
   {
     plan: 'center_medium',
@@ -47,8 +48,8 @@ export const PRODUCTS: PlanProduct[] = [
       { months: 12, label: 'سنوي', price: 4500 },
       { months: 24, label: 'سنتان', price: 8500 },
     ],
-    managers: 0, secretaries: 1, teachers: 2, maxStudents: null,
-    features: ['كل الصلاحيات', 'مدير + سكرتير + 2 مدرسين', 'طلاب غير محدود', 'تقارير PDF', 'إشعارات وواتساب'],
+    managers: 0, secretaries: 1, teachers: 2, maxStudents: 300,
+    features: ['كل صلاحيات الإدارة الأساسية', 'حتى 2 مدرسين + سكرتير', 'حتى 300 طالب', 'تقارير PDF', 'إشعارات وواتساب'],
   },
   {
     plan: 'solo_teacher',
@@ -98,7 +99,7 @@ export function limitsFor(centerKind: string | null | undefined, plan: string | 
       teachers: product.teachers, maxStudents: product.maxStudents,
     };
   }
-  // التجريبية والقديمة والمخصصة: حدود الشاملة (المدير هو المالك نفسه دائماً)
+  // التجريبية والقديمة والمخصصة: حدود الشاملة (المدير هو صاحب السنتر دائماً)
   return { managers: 0, secretaries: 2, teachers: 4, maxStudents: null };
 }
 
