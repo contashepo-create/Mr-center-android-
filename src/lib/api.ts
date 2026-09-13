@@ -475,6 +475,67 @@ export async function recordStaffCommissionPayment(input: {
   if (error) throw error;
 }
 
+/** صف عهدة يومي (تحصيل متوقع + تسليم فعلي + نتيجة المطابقة) */
+export interface CustodyRow {
+  id: string | null;
+  staff_id: string | null;
+  staff_name: string;
+  custody_date: string;
+  expected_amount: number;
+  delivered_amount: number;
+  status: 'open' | 'submitted' | 'matched' | 'shortage' | 'surplus';
+  notes: string;
+  submitted_at: string | null;
+  created_at: string | null;
+  shortage_resolved_amount: number;
+  shortage_resolution: '' | 'expense' | 'deduction' | 'mixed';
+  shortage_resolution_note: string;
+  shortage_resolved_at: string | null;
+}
+
+/** كشف العهدة الكامل: تحصيل متوقع يظهر فوراً حتى قبل التسليم + حالة كل تسليم */
+export async function fetchCustodyOverview(fromDate?: string | null, toDate?: string | null): Promise<CustodyRow[]> {
+  const { data, error } = await getSupabase().rpc('get_custody_overview', {
+    p_from: fromDate ?? null, p_to: toDate ?? null,
+  });
+  if (error) throw error;
+  return (data ?? []) as CustodyRow[];
+}
+
+/** تسليم عهدة الموظف نفسه (يحسب تلقائياً المتوقع من تحصيله اليومي) */
+export async function submitStaffCustody(input: {
+  staffId: string; date?: string; delivered: number; notes?: string;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('submit_staff_custody', {
+    p_staff: input.staffId, p_date: input.date || todayIso(),
+    p_delivered: input.delivered, p_notes: input.notes?.trim() || '',
+  });
+  if (error) throw error;
+}
+
+/** اعتماد/مراجعة تسليم عهدة موظف من المالك — يحدد مطابقة/عجز/زيادة تلقائياً */
+export async function settleStaffCustody(input: {
+  centerId: string; staffId: string; date: string; delivered: number; notes?: string;
+}): Promise<string> {
+  const { data, error } = await getSupabase().rpc('settle_staff_custody', {
+    p_center: input.centerId, p_staff: input.staffId, p_date: input.date,
+    p_delivered: input.delivered, p_notes: input.notes?.trim() || '',
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+/** تسوية عجز عهدة مسجّل: إما مصروف على السنتر أو خصم على صاحب العهدة */
+export async function resolveStaffCustodyShortage(input: {
+  custodyId: string; method: 'expense' | 'deduction'; amount: number; note?: string;
+}): Promise<{ ledger_id: string | null; deduction_id: string | null; remaining: number }> {
+  const { data, error } = await getSupabase().rpc('resolve_staff_custody_shortage', {
+    p_custody: input.custodyId, p_method: input.method, p_amount: input.amount, p_note: input.note?.trim() || '',
+  });
+  if (error) throw error;
+  return data as { ledger_id: string | null; deduction_id: string | null; remaining: number };
+}
+
 /** (المطور) دعوات فريق العمل — للعرض والسحب في شاشة الفريق */
 export async function devListInvites(centerId: string): Promise<StaffInviteRow[]> {
   const { data, error } = await getSupabase().from('staff_invites').select('id,center_id,code,name,phone,role,status,created_at')
