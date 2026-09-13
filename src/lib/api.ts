@@ -1226,10 +1226,15 @@ export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
     is_published: exam.is_published ?? false,
     attempts_allowed: exam.attempts_allowed ?? 1,
     show_result: exam.show_result ?? 'end',
+    delivery_mode: exam.delivery_mode ?? 'online',
+    online_mode: exam.online_mode ?? 'mixed',
     target_group_ids: exam.target_group_ids ?? [],
     availability_mode: exam.availability_mode ?? 'always',
     available_from: exam.availability_mode === 'scheduled' ? exam.available_from ?? null : null,
     available_until: exam.availability_mode === 'scheduled' ? exam.available_until ?? null : null,
+    paper_template: exam.paper_template ?? 'classic',
+    paper_footer: exam.paper_footer ?? '',
+    ornaments: exam.ornaments ?? null,
   };
   if (exam.id) {
     const { error } = await getSupabase().from('app_exams').update(payload).eq('id', exam.id);

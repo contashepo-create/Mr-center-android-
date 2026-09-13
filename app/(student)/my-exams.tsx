@@ -7,7 +7,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppButton, AppInput, Card, LoadingView, SectionTitle } from '../../src/components/controls';
 import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { FormMessage } from '../../src/components/pickers';
@@ -55,6 +55,37 @@ function correctLabel(q: ExamQuestion, model: ExamAnswer | undefined): string {
 
 function isManualType(t: ExamQuestionType): boolean {
   return t === 'essay' || t === 'short' || t === 'correct';
+}
+
+/** يعرض نص السؤال مع تسطير الكلمة/الكلمات المختارة في سؤال «صوّب ما تحته خط». */
+function UnderlinedQuestionText({ question }: { question: ExamQuestion }) {
+  if (question.type !== 'correct' || !question.underlined?.count) return <Text>{question.q}</Text>;
+  const start = Math.max(0, question.underlined.start - 1);
+  const end = start + Math.max(0, question.underlined.count);
+  let wordIndex = 0;
+  return (
+    <Text>
+      {question.q.split(/(\s+)/).map((piece, index) => {
+        if (!piece.trim()) return <Text key={index}>{piece}</Text>;
+        const underlined = wordIndex >= start && wordIndex < end;
+        wordIndex += 1;
+        return underlined ? <Text key={index} style={{ textDecorationLine: 'underline', fontWeight: '800' }}>{piece}</Text> : <Text key={index}>{piece}</Text>;
+      })}
+    </Text>
+  );
+}
+
+/** صورة السؤال — تظهر فوق/تحت النص في الاختبار الإلكتروني، بلا موضع «بجانب» على الهاتف. */
+function QuestionImage({ q }: { q: ExamQuestion }) {
+  if (!q.image) return null;
+  const width = Math.min(320, Math.max(80, Number(q.imageSize) || 200));
+  return (
+    <Image
+      source={{ uri: q.image }}
+      style={{ width, height: width * 0.66, borderRadius: 8, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.sm, backgroundColor: '#fff' }}
+      resizeMode="contain"
+    />
+  );
 }
 
 /** بطاقة مراجعة سؤال بسؤال بعد التصحيح، تُستخدم أيضاً بعد كل سؤال إن اختارت الإدارة ذلك */
@@ -285,8 +316,9 @@ export default function StudentExamsScreen() {
             }
             return (
               <Card key={qi} style={{ marginBottom: spacing.md }}>
+                {q.image && q.imagePosition !== 'below' ? <QuestionImage q={q} /> : null}
                 <Text style={styles.qText}>
-                  {qi + 1}) {q.q} [{EXAM_TYPE_LABEL[qtype] ?? qtype} — {marks} درجة]
+                  {qi + 1}) <UnderlinedQuestionText question={q} /> [{EXAM_TYPE_LABEL[qtype] ?? qtype} — {marks} درجة]
                 </Text>
 
                 {/* اختياري / صح-خطأ: اختيار واحد */}
@@ -381,6 +413,7 @@ export default function StudentExamsScreen() {
                     onChangeText={(v) => setAnswers((p) => p.map((a, ai) => (ai === qi ? v : a)))}
                   />
                 ) : null}
+                {q.image && q.imagePosition === 'below' ? <QuestionImage q={q} /> : null}
               </Card>
             );
           })}

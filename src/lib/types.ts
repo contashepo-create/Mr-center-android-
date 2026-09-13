@@ -292,6 +292,16 @@ export interface ExamQuestion {
   answer?: string;
   /** أزواج التوصيل (وصل) */
   pairs?: ExamPair[];
+  /** معرف رأس السؤال/القسم في محرر الاختبارات؛ يحافظ على ترتيب الأسئلة الفرعية عند إعادة الفتح. */
+  sectionId?: string;
+  /** نطاق الكلمات التي تظهر تحت خط في سؤال «صوّب ما تحته خط» (ترقيم يبدأ من 1). */
+  underlined?: { start: number; count: number };
+  /** صورة السؤال (رابط خارجي أو رابط تخزين عام) */
+  image?: string | null;
+  /** مكان الصورة: بجانب السؤال (ورقي) أو فوق/تحت (إلكتروني) */
+  imagePosition?: 'beside' | 'above' | 'below';
+  /** عرض الصورة بالبكسل (80..600) */
+  imageSize?: number;
 }
 
 /** قيمة إجابة سؤال: فهرس / مصفوفة فهارس / نص / null لليدوي بلا نموذج */
@@ -299,6 +309,31 @@ export type ExamAnswer = number | number[] | string | null;
 
 export type ExamResultMode = 'after_each' | 'end' | 'never';
 export type ExamAvailabilityMode = 'always' | 'scheduled';
+export type ExamDeliveryMode = 'paper' | 'online';
+export type OnlineExamMode = 'objective' | 'essay' | 'mixed';
+/** قوالب ورقة الاختبار. التسعة الأولى تطابق Center Publish؛ formal يبقي القالب السابق متوافقاً. */
+export type PaperTemplate = 'classic' | 'lab' | 'life' | 'cosmos' | 'explorer' | 'royal' | 'parchment' | 'wedding' | 'modern' | 'formal';
+
+/** كثافة الزخارف حول الورقة */
+export type OrnamentDensity = 'low' | 'medium' | 'high';
+
+/** ختم زخرفة موضوع يدوياً على الورقة (كنسبة مئوية من أبعادها) */
+export interface OrnamentStamp {
+  id: string;
+  kind: string;
+  x: number; // 0..100
+  y: number; // 0..100
+  size: number; // px
+}
+
+/** إعدادات زخارف ورقة الاختبار */
+export interface ExamOrnaments {
+  placement: 'auto' | 'manual';
+  density: OrnamentDensity;
+  opacity: number; // 0..1
+  kinds: string[]; // الأنواع المختارة (تُعبأ تلقائياً حسب المادة)
+  stamps: OrnamentStamp[]; // أختام يدوية (وضع manual)
+}
 
 export interface AppExam {
   id: string;
@@ -315,11 +350,20 @@ export interface AppExam {
   attempts_allowed?: number;
   /** متى تظهر النتيجة للطالب: بعد كل سؤال، عند التسليم، أو أبداً (تنتظر تحرير الإدارة). */
   show_result?: ExamResultMode;
+  /** مسار الاختبار وتحكم عرضه — تتوافق الاختبارات القديمة مع online/mixed تلقائياً. */
+  delivery_mode?: ExamDeliveryMode;
+  online_mode?: OnlineExamMode;
   /** تقييد الاختبار على مجموعات محددة داخل الصف؛ فارغة = كل مجموعات الصف. */
   target_group_ids?: string[];
   availability_mode?: ExamAvailabilityMode;
   available_from?: string | null;
   available_until?: string | null;
+  /** قالب ورقة الاختبار (اختبارات ورقية فقط). */
+  paper_template?: PaperTemplate;
+  /** عبارة يكتبها المنشئ في نهاية ورقة الاختبار (اختيارية). */
+  paper_footer?: string;
+  /** زخارف الورقة (اختياري — قد تكون غائبة في الاختبارات القديمة) */
+  ornaments?: ExamOrnaments | null;
   created_at: string;
 }
 
