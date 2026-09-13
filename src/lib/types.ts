@@ -245,7 +245,7 @@ export interface FiscalYear {
   closed_at: string | null;
 }
 
-export interface StaffInvite {
+export interface StaffInviteRow {
   id: string;
   center_id: string;
   code: string;
@@ -297,6 +297,9 @@ export interface ExamQuestion {
 /** قيمة إجابة سؤال: فهرس / مصفوفة فهارس / نص / null لليدوي بلا نموذج */
 export type ExamAnswer = number | number[] | string | null;
 
+export type ExamResultMode = 'after_each' | 'end' | 'never';
+export type ExamAvailabilityMode = 'always' | 'scheduled';
+
 export interface AppExam {
   id: string;
   center_id: string;
@@ -308,6 +311,15 @@ export interface AppExam {
   answers: ExamAnswer[];
   total_score: number;
   is_published: boolean;
+  /** عدد المحاولات المسموحة لكل طالب (افتراضي 1). */
+  attempts_allowed?: number;
+  /** متى تظهر النتيجة للطالب: بعد كل سؤال، عند التسليم، أو أبداً (تنتظر تحرير الإدارة). */
+  show_result?: ExamResultMode;
+  /** تقييد الاختبار على مجموعات محددة داخل الصف؛ فارغة = كل مجموعات الصف. */
+  target_group_ids?: string[];
+  availability_mode?: ExamAvailabilityMode;
+  available_from?: string | null;
+  available_until?: string | null;
   created_at: string;
 }
 
@@ -320,6 +332,9 @@ export interface PublishedExam {
   total_score: number;
   questions: ExamQuestion[];
   attempted: boolean;
+  attempts_allowed: number;
+  attempts_used: number;
+  show_result: ExamResultMode;
   created_at: string;
 }
 

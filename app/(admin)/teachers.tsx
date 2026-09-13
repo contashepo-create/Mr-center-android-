@@ -18,7 +18,7 @@ import {
 import { useSession } from '../../src/lib/session';
 import { isOwner, roleLabel, TEACHER_PERMS } from '../../src/lib/staff';
 import { limitsFor } from '../../src/lib/billing';
-import type { Center, Group, Profile, StaffInvite, TeacherPermKey } from '../../src/lib/types';
+import type { Center, Group, Profile, StaffInviteRow, TeacherPermKey } from '../../src/lib/types';
 import { arabicError, formatDate } from '../../src/lib/utils';
 import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
@@ -44,7 +44,7 @@ export default function TeachersScreen() {
   const [invPhone, setInvPhone] = useState('');
   const [invRole, setInvRole] = useState<'secretary' | 'teacher'>('secretary');
   const [inviteCode, setInviteCode] = useState<string | null>(null);
-  const [invites, setInvites] = useState<StaffInvite[]>([]);
+  const [invites, setInvites] = useState<StaffInviteRow[]>([]);
   const [invBusy, setInvBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -172,7 +172,7 @@ export default function TeachersScreen() {
     catch { Alert.alert('كود الدعوة', code); }
   };
 
-  const revokeInvite = (inv: StaffInvite) => {
+  const revokeInvite = (inv: StaffInviteRow) => {
     Alert.alert('سحب الدعوة', `إلغاء كود دعوة «${inv.name}»؟ لن يعمل الكود بعد الآن.`, [
       { text: 'إلغاء', style: 'cancel' },
       { text: 'سحب', style: 'destructive', onPress: async () => { try { await revokeStaffInvite(inv.id); await load(); } catch (e) { Alert.alert('تعذر السحب', arabicError(e)); } } },

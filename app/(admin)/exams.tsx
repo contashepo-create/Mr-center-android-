@@ -13,11 +13,11 @@ import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { FormMessage, OptionPicker } from '../../src/components/pickers';
 import { can } from '../../src/lib/staff';
 import {
-  deleteExam, fetchAttemptsForExam, fetchExams, fetchGrades, fetchStudents,
+  deleteExam, fetchAttemptsForExam, fetchExams, fetchGrades, fetchGroups, fetchStudents,
   gradeAttemptManually, toggleExamPublished, upsertExam,
 } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
-import type { AppExam, ExamAnswer, ExamAttempt, ExamQuestionType, Grade, Student } from '../../src/lib/types';
+import type { AppExam, ExamAnswer, ExamAttempt, ExamAvailabilityMode, ExamQuestionType, ExamResultMode, Grade, Group, Student } from '../../src/lib/types';
 import {
   arabicError, examMarksTotal, EXAM_TYPE_LABEL, formatDate, isManualExamType,
   normalizeAnswerText, validateExamDraft,
@@ -60,6 +60,12 @@ const TYPE_OPTIONS: { value: ExamQuestionType; label: string }[] = [
   { value: 'short', label: 'إجابة قصيرة' },
 ];
 
+const SHOW_RESULT_LABEL: Record<ExamResultMode, string> = {
+  after_each: 'بعد كل محاولة',
+  end: 'بعد الانتهاء',
+  never: 'لا تظهر',
+};
+
 const STARTERS: { label: string; duration: number; count: number; type: ExamQuestionType; marks: number }[] = [
   { label: 'قصير 10د · 5 اختياري', duration: 10, count: 5, type: 'mcq', marks: 1 },
   { label: 'متوسط 30د · 10 اختياري', duration: 30, count: 10, type: 'mcq', marks: 2 },
@@ -73,6 +79,7 @@ export default function ExamsScreen() {
   const centerId = profile?.center_id ?? '';
   const [exams, setExams] = useState<AppExam[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -84,6 +91,12 @@ export default function ExamsScreen() {
   const [duration, setDuration] = useState('30');
   const [total, setTotal] = useState('');
   const [published, setPublished] = useState(false);
+  const [attemptsAllowed, setAttemptsAllowed] = useState('1');
+  const [showResult, setShowResult] = useState<ExamResultMode>('end');
+  const [targetGroupIds, setTargetGroupIds] = useState<string[]>([]);
+  const [availabilityMode, setAvailabilityMode] = useState<ExamAvailabilityMode>('always');
+  const [availableFrom, setAvailableFrom] = useState('');
+  const [availableUntil, setAvailableUntil] = useState('');
   const [questions, setQuestions] = useState<DraftQ[]>([blankQ()]);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -98,8 +111,8 @@ export default function ExamsScreen() {
   const load = useCallback(async () => {
     if (!centerId) return;
     try {
-      const [e, g, s] = await Promise.all([fetchExams(centerId), fetchGrades(centerId), fetchStudents(centerId)]);
-      setExams(e); setGrades(g); setStudents(s);
+      const [e, g, gr, s] = await Promise.all([fetchExams(centerId), fetchGrades(centerId), fetchGroups(centerId), fetchStudents(centerId)]);
+      setExams(e); setGrades(g); setGroups(gr); setStudents(s);
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
@@ -112,6 +125,8 @@ export default function ExamsScreen() {
   const openAdd = () => {
     setEditing(null); setTitle(''); setSubject(''); setGradeId(null);
     setDuration('30'); setTotal(''); setPublished(false);
+    setAttemptsAllowed('1'); setShowResult('end'); setTargetGroupIds([]);
+    setAvailabilityMode('always'); setAvailableFrom(''); setAvailableUntil('');
     setQuestions([blankQ()]); setFormError(null); setFormOpen(true);
   };
 
@@ -119,6 +134,12 @@ export default function ExamsScreen() {
     setEditing(e); setTitle(e.title); setSubject(e.subject ?? '');
     setGradeId(e.grade_id); setDuration(String(e.duration_minutes ?? 30));
     setTotal(e.total_score ? String(e.total_score) : ''); setPublished(!!e.is_published);
+    setAttemptsAllowed(String(e.attempts_allowed ?? 1));
+    setShowResult(e.show_result ?? 'end');
+    setTargetGroupIds(e.target_group_ids ?? []);
+    setAvailabilityMode(e.availability_mode ?? 'always');
+    setAvailableFrom(e.available_from ? e.available_from.slice(0, 10) : '');
+    setAvailableUntil(e.available_until ? e.available_until.slice(0, 10) : '');
     setQuestions(e.questions.length > 0
       ? e.questions.map((raw, i) => {
         const type = (raw.type ?? 'mcq') as ExamQuestionType;
@@ -207,6 +228,12 @@ export default function ExamsScreen() {
           questions: cleanQuestions,
           answers,
           is_published: published,
+          attempts_allowed: Math.max(1, Number(attemptsAllowed) || 1),
+          show_result: showResult,
+          target_group_ids: targetGroupIds,
+          availability_mode: availabilityMode,
+          available_from: availabilityMode === 'scheduled' && availableFrom.trim() ? availableFrom.trim() : null,
+          available_until: availabilityMode === 'scheduled' && availableUntil.trim() ? availableUntil.trim() : null,
         });
         setFormOpen(false);
         await load();
@@ -350,6 +377,12 @@ export default function ExamsScreen() {
                     {item.subject || 'بدون مادة'} · {item.questions.length} سؤال
                     {item.questions.some((q) => isManualExamType(q.type)) ? ' (فيه يدوي)' : ''} · {item.duration_minutes} دقيقة · من {item.total_score} درجة
                   </Text>
+                  <Text style={styles.examMeta}>
+                    محاولات: {item.attempts_allowed ?? 1}
+                    {' · '}النتيجة: {SHOW_RESULT_LABEL[item.show_result ?? 'end']}
+                    {item.target_group_ids && item.target_group_ids.length > 0 ? ` · ${item.target_group_ids.length} مجموعة مستهدفة` : ' · لكل الطلاب'}
+                    {item.availability_mode === 'scheduled' ? ' · موعد محدد' : ''}
+                  </Text>
                 </View>
                 <View style={[styles.pubPill, { backgroundColor: item.is_published ? colors.successBg : colors.warningBg }]}>
                   <Text style={[styles.pubText, { color: item.is_published ? colors.success : colors.warning }]}>
@@ -412,6 +445,89 @@ export default function ExamsScreen() {
                 <Ionicons name={published ? 'checkbox' : 'square-outline'} size={22} color={published ? colors.success : colors.textMuted} />
                 <Text style={styles.pubRowText}>نشر للطلاب فور الحفظ</Text>
               </Pressable>
+
+              <SectionTitle title="إعدادات الامتحان" />
+              <View style={{ flexDirection: 'row', gap: spacing.md }}>
+                <View style={{ flex: 1 }}>
+                  <AppInput
+                    label="عدد المحاولات المسموحة"
+                    icon="repeat"
+                    value={attemptsAllowed}
+                    onChangeText={setAttemptsAllowed}
+                    keyboardType="numeric"
+                    textAlign="left"
+                    style={{ writingDirection: 'ltr' }}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <OptionPicker
+                    label="إظهار النتيجة"
+                    icon="eye"
+                    value={showResult}
+                    options={[
+                      { value: 'after_each', label: 'بعد كل محاولة' },
+                      { value: 'end', label: 'بعد الانتهاء' },
+                      { value: 'never', label: 'لا تظهر' },
+                    ]}
+                    onChange={(v) => setShowResult(v as ExamResultMode)}
+                  />
+                </View>
+              </View>
+
+              <Text style={[styles.pubRowText, { marginBottom: spacing.sm }]}>المجموعات المستهدفة (اختياري — فارغ = الكل)</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md }}>
+                {groups.length === 0 ? (
+                  <Text style={styles.examMeta}>لا توجد مجموعات بعد</Text>
+                ) : groups.map((g) => {
+                  const active = targetGroupIds.includes(g.id);
+                  return (
+                    <Pressable
+                      key={g.id}
+                      style={[styles.starter, active && { backgroundColor: colors.successBg, borderColor: colors.success }]}
+                      onPress={() => setTargetGroupIds((prev) => (prev.includes(g.id) ? prev.filter((id) => id !== g.id) : [...prev, g.id]))}
+                    >
+                      <Text style={[styles.starterText, active && { color: colors.success }]}>{g.name}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <OptionPicker
+                label="توقيت الإتاحة"
+                icon="calendar"
+                value={availabilityMode}
+                options={[
+                  { value: 'always', label: 'متاح دائمًا' },
+                  { value: 'scheduled', label: 'حسب موعد محدد' },
+                ]}
+                onChange={(v) => setAvailabilityMode(v as ExamAvailabilityMode)}
+              />
+              {availabilityMode === 'scheduled' ? (
+                <View style={{ flexDirection: 'row', gap: spacing.md }}>
+                  <View style={{ flex: 1 }}>
+                    <AppInput
+                      label="متاح من (YYYY-MM-DD)"
+                      icon="calendar"
+                      placeholder="2026-01-01"
+                      value={availableFrom}
+                      onChangeText={setAvailableFrom}
+                      textAlign="left"
+                      style={{ writingDirection: 'ltr' }}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <AppInput
+                      label="متاح حتى (YYYY-MM-DD)"
+                      icon="calendar"
+                      placeholder="2026-01-31"
+                      value={availableUntil}
+                      onChangeText={setAvailableUntil}
+                      textAlign="left"
+                      style={{ writingDirection: 'ltr' }}
+                    />
+                  </View>
+                </View>
+              ) : null}
 
               <SectionTitle title="قوالب بداية سريعة" />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md }}>

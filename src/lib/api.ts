@@ -9,7 +9,7 @@ import { claimMySession } from './sessionGuard';
 import { nowIso, todayIso, uuid } from './utils';
 import type {
   Announcement, AppExam, AppInquiry, AppNotification, AppSurvey, AppSurveyResponse, Attendance, AttendanceStatus,
-  BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, FiscalYear, Grade, StaffInvite,
+  BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, FiscalYear, Grade, StaffInviteRow,
   ExamAnswer, ExamQuestion, ExamQuestionType, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
   PublishedExam, SessionRecord, Student, StudentAccount, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
   DeveloperBroadcastChannel, CenterBroadcastDelivery, DeveloperBroadcastPresentation, DeveloperBroadcastResult, CommunicationSummary,
@@ -318,11 +318,11 @@ export async function createStaffInvite(input: {
   throw new Error('تعذر توليد كود فريد — حاول مجدداً');
 }
 
-export async function fetchStaffInvites(centerId: string): Promise<StaffInvite[]> {
+export async function fetchStaffInvites(centerId: string): Promise<StaffInviteRow[]> {
   const { data, error } = await getSupabase().from('staff_invites').select('*')
     .eq('center_id', centerId).order('created_at', { ascending: false }).limit(100);
   if (error) throw error;
-  return (data ?? []) as StaffInvite[];
+  return (data ?? []) as StaffInviteRow[];
 }
 
 export async function revokeStaffInvite(id: string): Promise<void> {
@@ -475,11 +475,11 @@ export async function recordStaffCommissionPayment(input: {
 }
 
 /** (المطور) دعوات فريق العمل — للعرض والسحب في شاشة الفريق */
-export async function devListInvites(centerId: string): Promise<StaffInvite[]> {
+export async function devListInvites(centerId: string): Promise<StaffInviteRow[]> {
   const { data, error } = await getSupabase().from('staff_invites').select('id,center_id,code,name,phone,role,status,created_at')
     .eq('center_id', centerId).order('created_at', { ascending: false }).limit(30);
   if (error) throw error;
-  return (data ?? []) as StaffInvite[];
+  return (data ?? []) as StaffInviteRow[];
 }
 
 export async function deleteTeacher(id: string): Promise<void> {
@@ -1161,6 +1161,12 @@ export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
     answers: exam.answers,
     total_score: total,
     is_published: exam.is_published ?? false,
+    attempts_allowed: exam.attempts_allowed ?? 1,
+    show_result: exam.show_result ?? 'end',
+    target_group_ids: exam.target_group_ids ?? [],
+    availability_mode: exam.availability_mode ?? 'always',
+    available_from: exam.availability_mode === 'scheduled' ? exam.available_from ?? null : null,
+    available_until: exam.availability_mode === 'scheduled' ? exam.available_until ?? null : null,
   };
   if (exam.id) {
     const { error } = await getSupabase().from('app_exams').update(payload).eq('id', exam.id);
@@ -1190,14 +1196,24 @@ export async function fetchPublishedExams(): Promise<PublishedExam[]> {
   return (data ?? []) as PublishedExam[];
 }
 
-export async function submitExam(examId: string, answers: ExamAnswer[]): Promise<{
-  score: number; max_score: number; correct: number; total: number; status: string;
-}> {
+export interface ExamResult {
+  score: number;
+  max_score: number;
+  correct: number;
+  total: number;
+  status: string;
+  attempts_used?: number;
+  attempts_allowed?: number;
+  /** مراجعة سؤال بسؤال؛ model = الإجابة النموذجية (إن أُرفقت من الخادم) */
+  per_question?: { q: number; correct: boolean | null; earned: number; marks: number; model?: ExamAnswer }[];
+}
+
+export async function submitExam(examId: string, answers: ExamAnswer[]): Promise<ExamResult> {
   const { data, error } = await getSupabase().rpc('submit_exam_attempt', {
     p_exam_id: examId, p_answers: answers,
   });
   if (error) throw error;
-  return data as { score: number; max_score: number; correct: number; total: number; status: string };
+  return data as ExamResult;
 }
 
 /** تصحيح يدوي لمحاولة فيها مقالي (المعلم يضع الدرجة النهائية) */
@@ -1466,29 +1482,6 @@ export async function fetchMyNotifications(): Promise<MyNotification[]> {
   const { data, error } = await getSupabase().rpc('get_my_notifications');
   if (error) throw error;
   return (data ?? []) as MyNotification[];
-}
-
-/** إشعارات المطور الخاصة بأصحاب السنتر (قناة owners) */
-export async function fetchOwnerNotices(centerId: string): Promise<AppNotification[]> {
-  const { data, error } = await getSupabase().from('app_notifications').select('*')
-    .eq('center_id', centerId).eq('audience', 'owners')
-    .order('created_at', { ascending: false }).limit(100);
-  if (error) throw error;
-  return (data ?? []) as AppNotification[];
-}
-
-/** تعليم إشعار مطور كمقروء (يُخزن بمعرف حساب المسئول) */
-export async function markOwnerNoticeRead(centerId: string, notificationId: string): Promise<void> {
-  const { data: sess } = await getSupabase().auth.getSession();
-  const uid = sess.session?.user.id;
-  if (!uid) throw new Error('not_authenticated');
-  const { data: mine } = await getSupabase().from('app_notification_reads').select('id')
-    .eq('notification_id', notificationId).eq('student_id', uid).maybeSingle();
-  if (mine) return;
-  const { error } = await getSupabase().from('app_notification_reads').insert({
-    id: uuid(), center_id: centerId, notification_id: notificationId, student_id: uid,
-  });
-  if (error) throw error;
 }
 
 // ------------------------------------------------------------
