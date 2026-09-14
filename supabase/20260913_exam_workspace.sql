@@ -106,7 +106,12 @@ BEGIN
     v_type := COALESCE(v_q ->> 'type', 'mcq');
     v_marks := COALESCE(NULLIF(v_q ->> 'marks', '')::NUMERIC, 1);
     v_total_marks := v_total_marks + v_marks; v_ok := false; v_earn := 0;
-    IF v_type IN ('essay', 'correct', 'short') THEN
+    -- «صحّح الخطأ»: مطابقة تامة للنموذج = درجة آلية بلا مراجعة (كان هذا الفرع مفقوداً هنا
+    -- فسقط كل سؤال «صحّح» في المراجعة اليدوية دائماً حتى مع مطابقة تامة — رجّعناه ليطابق
+    -- سلوك 20260912_exams_complaints.sql والمخطط الأساسي).
+    IF v_type = 'correct' AND (v_exam.answers -> i) IS NOT NULL AND (v_exam.answers -> i) = (COALESCE(p_answers, '[]'::jsonb) -> i) THEN
+      v_ok := true; v_earn := v_marks; v_correct := v_correct + 1; v_earned := v_earned + v_marks;
+    ELSIF v_type IN ('essay', 'correct', 'short') THEN
       v_has_essay := true;
       v_results := v_results || jsonb_build_object('q', i, 'correct', NULL, 'earned', 0, 'marks', v_marks, 'model', (v_exam.answers -> i));
       CONTINUE;
