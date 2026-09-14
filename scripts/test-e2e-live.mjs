@@ -186,9 +186,11 @@ try {
   ok('طالب لا يقرأ سجل طالب آخر', (peek ?? []).length === 0);
 
   // استفسار + رد
+  // ملاحظة: kind='transfer' يتطلب الآن from_group_id/to_group_id (حارس guard_transfer_request
+  // من 20260913_student_transfer_requests.sql)، وهذا الاختبار يفحص فقط تدفق إرسال/رد عام.
   await stu.from('app_inquiries').insert({
     id: `inq-${ts}`, center_id: centerId, student_id: linkedId,
-    kind: 'transfer', subject: 'نقل', body: 'أريد النقل', status: 'pending',
+    kind: 'question', subject: 'نقل', body: 'أريد النقل', status: 'pending',
   });
   ok('الطالب يرسل طلباً', true);
   await owner.from('app_inquiries').update({ reply: 'تم', status: 'approved' }).eq('id', `inq-${ts}`);
@@ -209,8 +211,10 @@ try {
   ok('الطالب يرى المنشور بلا إجابات', !!pub && JSON.stringify(pub).includes('س1') && !JSON.stringify(pub).includes('"answers"'));
   const { data: res } = await stu.rpc('submit_exam_attempt', { p_exam_id: exam.id, p_answers: [1, 'لأن...'] });
   ok('تصحيح تلقائي + مقالي للمراجعة', res?.score === 2 && res?.status === 'pending_review', JSON.stringify(res));
+  // منذ 20260912_exams_complaints.sql صار مسموحاً بعدة محاولات (attempts_allowed)،
+  // فمنع التكرار صار "استنفاد عدد المحاولات" لا "already_attempted" القديمة أحادية المحاولة.
   await expectThrow('منع تكرار المحاولة', () =>
-    stu.rpc('submit_exam_attempt', { p_exam_id: exam.id, p_answers: [1, 'x'] }), 'already_attempted');
+    stu.rpc('submit_exam_attempt', { p_exam_id: exam.id, p_answers: [1, 'x'] }), 'attempts_exhausted');
   await expectThrow('الطالب لا يزوّر درجته مباشرة', () =>
     stu2.from('app_exam_attempts').insert({
       id: `fake-${ts}`, center_id: centerId, exam_id: exam.id, student_id: 'zzz', answers: [], score: 100, max_score: 5,
@@ -282,12 +286,14 @@ try {
   const { data: myAtt } = await stu.from('attendance').select('id').eq('student_id', linkedId);
   ok('الطالب يرى حضوره', (myAtt ?? []).length >= 1);
   const now = new Date();
-  await owner.from('dues').insert({
+  // عمود السنة في dues هو due_year (وليس year — أُسقط عمود year القديم في
+  // 20260912_fix_year_columns.sql)، فالإدخال بـ year القديم كان يفشل صامتاً هنا.
+  const { error: dueErr } = await owner.from('dues').insert({
     id: `du-${ts}`, center_id: centerId, student_id: linkedId, group_id: group.id,
-    month: now.getMonth() + 1, year: now.getFullYear(), amount: 200, status: 'pending',
+    month: now.getMonth() + 1, due_year: now.getFullYear(), amount: 200, status: 'pending',
   });
   const { data: myDues } = await stu.from('dues').select('id').eq('student_id', linkedId);
-  ok('الطالب يرى مستحقاته', (myDues ?? []).length >= 1);
+  ok('الطالب يرى مستحقاته', !dueErr && (myDues ?? []).length >= 1, dueErr?.message?.slice(0, 90));
 
   // ═══ 4) سنتر ثانٍ: العزل الكامل ═══
   console.log('\n━━ العزل بين السناتر ━');
@@ -347,8 +353,11 @@ try {
   {
     const mgr = await mkStaff('mgr', 'manager', `010${String(Number(String(ts).slice(-8)) + 44)}`);
     ok('تسجيل مدير خامل', !mgr.error, mgr.error?.message?.slice(0, 80));
+    // «المدير الوحيد»: صاحب السنتر هو المدير دائماً — lim=0 لدور manager في staff_limit_check،
+    // فتفعيل أي حساب manager إضافي يُرفض خادمياً دوماً (لا يُزاد إلا عبر زيادات المطور).
     const { error: actMgr } = await owner.from('profiles').update({ is_active: true }).eq('id', mgr.uid);
-    ok('تفعيل المدير الأول (حد الباقة 1)', !actMgr, actMgr?.message?.slice(0, 80));
+    ok('تفعيل مدير إضافي يُرفض خادمياً (المدير الوحيد = صاحب السنتر)',
+      !!actMgr && String(actMgr.message).includes('staff_limit_reached'), actMgr?.message?.slice(0, 90));
     const mgr2 = await mkStaff('mgr2', 'manager', `010${String(Number(String(ts).slice(-8)) + 55)}`);
     const { error: actMgr2 } = await owner.from('profiles').update({ is_active: true }).eq('id', mgr2.uid);
     ok('مدير ثانٍ يُرفض خادمياً (staff_limit_reached)',

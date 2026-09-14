@@ -218,6 +218,7 @@ export function seededShuffle(n: number, seed: string): number[] {
 export function validateExamDraft(qs: {
   q: string; type: string; choices: string[]; marks: number;
   answer?: string; pairs?: { l: string; r: string }[]; corrects?: number[];
+  underlined?: { start: number; count: number };
 }[]): string | null {
   if (!qs || qs.length === 0) return 'أضف سؤالاً واحداً على الأقل';
   for (let i = 0; i < qs.length; i++) {
@@ -233,6 +234,9 @@ export function validateExamDraft(qs: {
     }
     if (q.type === 'complete' && !(q.answer ?? '').trim()) {
       return `اكتب الإجابة النموذجية للسؤال رقم ${n} (أكمل الفراغ)`;
+    }
+    if (q.type === 'correct' && (!(q.underlined?.count) || q.underlined.start < 1)) {
+      return `حدد الكلمة التي تحتها خط في السؤال رقم ${n} (صوّب ما تحته خط)`;
     }
     if (q.type === 'match') {
       const pairs = q.pairs ?? [];
@@ -346,6 +350,8 @@ export function arabicError(err: unknown): string {
   if (msg.includes('not_authenticated')) return 'تعذر إتمام التسجيل — سجّل دخولك أولاً ثم أعد المحاولة، وإن تكرر تواصل مع المطور';
   if (msg.includes('already_registered')) return 'هذا الحساب مسجل من قبل — سجّل دخولك مباشرة';
   if (msg.includes('invalid login')) return 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
+  if (msg.includes('login_rate_limited')) return 'محاولات دخول كثيرة — انتظر قليلاً ثم أعد المحاولة';
+  if (msg.includes('student_device_blocked')) return 'هذا الجهاز محجوب لهذا الطالب من إدارة السنتر';
   if (msg.includes('email not confirmed')) return 'بريدك غير مؤكد بعد — افتح رابط التأكيد المرسل إلى بريدك ثم سجّل دخولك';
   if (msg.includes('rate limit') || msg.includes('over_email_send_rate_limit')
     || msg.includes('over_request_rate_limit') || msg.includes('over_sms_send_rate_limit')
@@ -377,11 +383,48 @@ export function arabicError(err: unknown): string {
   if (msg.includes('staff_not_allowed')) return 'الحساب المنفرد بلا فريق تابع — رقِّ لسنتر متكامل أولاً';
   if (msg.includes('invalid_role')) return 'الدور المطلوب غير صالح';
   if (msg.includes('already_attempted')) return 'أديت هذا الامتحان من قبل — لا يمكن تكرار المحاولة';
+  if (msg.includes('attempts_exhausted')) return 'استنفدت عدد المحاولات المسموح لك في هذا الاختبار';
+  if (msg.includes('complaint_rate_limited')) return 'تم استلام عدد كافٍ من الشكاوي في الوقت الحالي — حاول مجدداً بعد ساعة';
+  if (msg.includes('invalid_phone')) return 'رقم الهاتف غير صحيح — أدخل رقم هاتف صحيح للتتبع';
+  if (msg.includes('empty_complaint')) return 'اكتب نص الشكوى أولاً';
   if (msg.includes('already_answered')) return 'أجبت على هذا الاستبيان من قبل';
   if (msg.includes('exam_not_found')) return 'الامتحان غير متاح حالياً';
+  if (msg.includes('invalid_payment_amount')) return 'أدخل مبلغ تحصيل صحيحاً أكبر من صفر';
+  if (msg.includes('invalid_payment_period')) return 'شهر أو سنة التحصيل غير صحيحين';
+  if (msg.includes('group_uses_attendance_dues')) return 'هذه المجموعة مضبوطة لإنشاء الاستحقاق عند الحضور — غيّر طريقتها من صفحة الصفوف والمجموعات أولاً';
+  if (msg.includes('invalid_due_period')) return 'شهر أو سنة الاستحقاق غير صحيحين';
+  if (msg.includes('invalid_bulk_payment')) return 'راجع الطلاب والمبالغ المختارة للتحصيل الجماعي ثم حاول مرة أخرى';
+  if (msg.includes('session_not_found')) return 'الحصة المحددة غير موجودة أو لا تخص هذا السنتر';
+  if (msg.includes('payment_exceeds_remaining')) return 'المبلغ أكبر من المتبقي في هذا المستحق — لا يمكن تجاوز قيمة المستحق';
+  if (msg.includes('student_not_in_center')) return 'الطالب المحدد لا يخص هذا السنتر';
+  if (msg.includes('center_inactive')) return 'السنتر موقوف أو الاشتراك منتهي — لا يمكن تنفيذ هذه العملية حالياً';
+  if (msg.includes('due_not_found')) return 'المستحق المحدد غير موجود أو لا تملك صلاحية تحصيله';
+  if (msg.includes('accounting_not_enabled')) return 'خدمة المحاسبة غير مفعلة لسنترك حالياً';
+  if (msg.includes('invalid_employee')) return 'الموظف المختار غير نشط أو لا يخص هذا السنتر';
+  if (msg.includes('invalid_advance_amount')) return 'أدخل مبلغ سلفة صحيحاً أكبر من صفر';
+  if (msg.includes('student_device_not_found')) return 'لم يعد هذا الجهاز مسجلاً لهذا الطالب';
+  if (msg.includes('invalid_device')) return 'معرّف الجهاز غير صالح';
+  if (msg.includes('custody_has_no_shortage')) return 'لا يوجد عجز في هذه العهدة لتسويته';
+  if (msg.includes('invalid_custody_resolution_amount')) return 'أدخل مبلغاً صحيحاً لا يتجاوز العجز غير المسوّى';
+  if (msg.includes('ledger_source_managed')) return 'هذا القيد مرتبط بإيصال تحصيل الطالب؛ عدّل العملية من قسم التحصيل حتى لا تختلف السجلات';
+  if (msg.includes('salary_amount_requires_reversal')) return 'لا يمكن تغيير مبلغ راتب صُرف من الدفتر لأنه مرتبط بسلف وخصومات؛ سجل تصحيحاً/عكساً موثقاً';
+  if (msg.includes('advance_edit_below_applied')) return 'لا يمكن تخفيض السلفة عن الجزء الذي خُصم فعلاً من رواتب سابقة';
+  if (msg.includes('invalid_staff_deduction_edit')) return 'لا يمكن تخفيض الخصم عن الجزء الذي عولج بالفعل؛ تحقق من المبلغ والسبب والتاريخ';
+  if (msg.includes('invalid_staff_deduction')) return 'أدخل سبباً ومبلغ خصم صحيحاً أكبر من صفر';
+  if (msg.includes('deduction_exceeds_selected_balance')) return 'المبلغ المعتمد أكبر من رصيد الخصومات المحددة';
+  if (msg.includes('deduction_source_allocation_failed')) return 'تعذر توزيع الخصم على مصادره — حاول مرة أخرى';
+  if (msg.includes('deduction_not_found')) return 'الخصم المحدد غير موجود أو تم حذفه';
+  if (msg.includes('ledger_entry_not_found')) return 'القيد المحدد غير موجود أو تم حذفه';
+  if (msg.includes('custody_resolution_exceeds_shortage')) return 'لا يمكن خفض مبلغ التسليم بعد تسوية جزء من العجز';
+  if (msg.includes('invalid_salary_amount')) return 'أدخل راتباً أساسياً صحيحاً أكبر من صفر';
+  if (msg.includes('invalid_commission_amount')) return 'أدخل مبلغ عمولة صحيحاً أكبر من صفر';
+  if (msg.includes('invalid_ledger_entry') || msg.includes('invalid_ledger_kind')) return 'تحقق من نوع الحركة وتصنيفها ومبلغها';
+  if (msg.includes('advance_exceeds_balance')) return 'قيمة السلفة المسوّاة أكبر من رصيد سلف الموظف القائم';
+  if (msg.includes('payroll_deductions_exceed_total')) return 'السلفة المسوّاة والخصومات أكبر من إجمالي استحقاق الراتب';
   if (msg.includes('invalid_group')) return 'المجموعة المختارة لا تخص هذا السنتر — أعد اختيارها';
   if (msg.includes('invalid_grade')) return 'الصف المختار لا يخص هذا السنتر — أعد اختياره';
   if (msg.includes('sharing_unavailable')) return 'المشاركة غير متاحة على هذا الجهاز';
+  if (msg.includes('not_allowed')) return 'ليس لديك صلاحية لتنفيذ هذا الإجراء';
   if (msg.includes('row-level security')) return 'ليس لديك صلاحية لتنفيذ هذا الإجراء';
   if (msg.includes('duplicate key')) return 'البيانات مسجلة من قبل ولا يمكن تكرارها';
   return (err as any)?.message ?? 'حدث خطأ غير متوقع، حاول مرة أخرى';

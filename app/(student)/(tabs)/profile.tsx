@@ -73,6 +73,13 @@ export default function StudentProfileScreen() {
         </Card>
 
         <SectionTitle title="عام" />
+        <ListItem
+          title="تقريري الشامل"
+          subtitle="بياناتك وحضورك ودرجاتك ومستحقاتك"
+          icon="reader"
+          iconColor={colors.cyan}
+          onPress={() => router.push('/my-report')}
+        />
         <ThemeToggleRow />
         <ListItem
           title="حول التطبيق"

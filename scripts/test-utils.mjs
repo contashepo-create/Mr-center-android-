@@ -163,7 +163,8 @@ try {
   ok('وصل بزوج واحد يُرفض', u.validateExamDraft([{ q: 'صل', type: 'match', choices: [], marks: 2, pairs: [{ l: 'أ', r: '1' }] }]) !== null);
   ok('وصل بنصف زوج يُرفض', u.validateExamDraft([{ q: 'صل', type: 'match', choices: [], marks: 2, pairs: [{ l: 'أ', r: '' }, { l: 'ب', r: '2' }] }]) !== null);
   ok('وصل بزوجين كاملين يُقبل', u.validateExamDraft([{ q: 'صل', type: 'match', choices: [], marks: 2, pairs: [{ l: 'أ', r: '1' }, { l: 'ب', r: '2' }] }]) === null);
-  ok('صحّح بلا نموذج يُقبل (يدوي)', u.validateExamDraft([{ q: 'صحّح', type: 'correct', choices: [], marks: 2, answer: '' }]) === null);
+  ok('صحّح بلا تحديد كلمة تحتها خط يُرفض', u.validateExamDraft([{ q: 'صحّح', type: 'correct', choices: [], marks: 2, answer: '' }]) !== null);
+  ok('صحّح بتحديد كلمة تحتها خط يُقبل', u.validateExamDraft([{ q: 'صحّح', type: 'correct', choices: [], marks: 2, answer: '', underlined: { start: 1, count: 1 } }]) === null);
   ok('قصير يُقبل', u.validateExamDraft([{ q: 'اختصار', type: 'short', choices: [], marks: 1 }]) === null);
 
   console.log('\n━━ نطاقات البريد والروابط ━');

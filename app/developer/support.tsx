@@ -10,7 +10,7 @@ import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleShee
 import { AppButton, AppInput, Card, EmptyState, LoadingView, SectionTitle } from '../../src/components/controls';
 import { BackHeader, GradientScreen, ScreenHeader } from '../../src/components/layout';
 import { DeveloperGate } from '../../src/components/DeveloperGate';
-import { devFetchSupportMessages, devSendSupportMessage } from '../../src/lib/api';
+import { devFetchSupportMessages, devSendSupportMessage, markMySupportMessagesRead } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import { getSupabase } from '../../src/lib/supabase';
 import type { SupportMessage } from '../../src/lib/types';
@@ -160,7 +160,7 @@ export default function DeveloperSupportScreen() {
             {threads.map((t) => {
               const last = t.messages[t.messages.length - 1];
               return (
-                <Pressable key={t.centerId} onPress={() => { setOpenCenter(t.centerId); setDraft(''); }} style={styles.threadRow}>
+                <Pressable key={t.centerId} onPress={() => { setOpenCenter(t.centerId); setDraft(''); void markMySupportMessagesRead(t.centerId).catch(() => {}); }} style={styles.threadRow}>
                   <View style={styles.threadIcon}>
                     <Ionicons name="business" size={18} color={colors.primary} />
                   </View>

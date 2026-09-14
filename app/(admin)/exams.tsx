@@ -13,17 +13,48 @@ import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { FormMessage, OptionPicker } from '../../src/components/pickers';
 import { can } from '../../src/lib/staff';
 import {
-  deleteExam, fetchAttemptsForExam, fetchExams, fetchGrades, fetchStudents,
+  deleteExam, fetchAttemptsForExam, fetchExams, fetchGrades, fetchGroups, fetchStudents,
   gradeAttemptManually, toggleExamPublished, upsertExam,
 } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
-import type { AppExam, ExamAnswer, ExamAttempt, ExamQuestionType, Grade, Student } from '../../src/lib/types';
+import type {
+  AppExam, ExamAnswer, ExamAttempt, ExamAvailabilityMode, ExamDeliveryMode, ExamOrnaments,
+  ExamQuestionType, ExamResultMode, Grade, Group, OnlineExamMode, OrnamentDensity, PaperTemplate, Student,
+} from '../../src/lib/types';
 import {
   arabicError, examMarksTotal, EXAM_TYPE_LABEL, formatDate, isManualExamType,
   normalizeAnswerText, validateExamDraft,
 } from '../../src/lib/utils';
-import { buildReportHtml, shareReportPdf } from '../../src/lib/report';
+import { buildExamPaperHtml, fetchReportBranding, shareReportPdf } from '../../src/lib/report';
+import { ALL_ORNAMENTS, ornamentsForSubject, subjectLabelFor } from '../../src/lib/exam-ornaments';
+import { OrnamentStampEditor } from '../../src/components/ornament-stamp-editor';
 import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
+
+const DELIVERY_OPTIONS: { value: ExamDeliveryMode; label: string }[] = [
+  { value: 'online', label: 'إلكتروني — يؤديه الطالب داخل التطبيق' },
+  { value: 'paper', label: 'ورقي — للطباعة فقط' },
+];
+
+const ONLINE_MODE_OPTIONS: { value: OnlineExamMode; label: string; hint: string }[] = [
+  { value: 'objective', label: 'موضوعي', hint: 'اختيار من متعدد/متعدد الإجابات/صح وخطأ/أكمل/وصل — تصحيح تلقائي' },
+  { value: 'essay', label: 'مقالي', hint: 'مقالي/إجابة قصيرة/صحّح الخطأ — مراجعة المعلم يدوياً' },
+  { value: 'mixed', label: 'مختلط', hint: 'كل أنواع الأسئلة الثمانية معاً' },
+];
+
+const PAPER_TEMPLATE_OPTIONS: { value: PaperTemplate; label: string; symbol: string }[] = [
+  { value: 'classic', label: 'كلاسيكي', symbol: '📄' },
+  { value: 'formal', label: 'رسمي', symbol: '🏛️' },
+  { value: 'modern', label: 'عصري', symbol: '🌐' },
+  { value: 'lab', label: 'معملي', symbol: '🧪' },
+  { value: 'life', label: 'أحياء', symbol: '🌿' },
+  { value: 'cosmos', label: 'فلكي', symbol: '🌌' },
+  { value: 'explorer', label: 'مستكشف', symbol: '🧭' },
+  { value: 'royal', label: 'ملكي', symbol: '👑' },
+  { value: 'parchment', label: 'ورق قديم', symbol: '📜' },
+  { value: 'wedding', label: 'احتفالي', symbol: '🎉' },
+];
+
+const blankOrnaments = (): ExamOrnaments => ({ placement: 'auto', density: 'medium', opacity: 0.18, kinds: [], stamps: [] });
 
 interface DraftQ {
   q: string;
@@ -34,6 +65,10 @@ interface DraftQ {
   answer: string;                  // complete / correct (نموذج)
   pairs: { l: string; r: string }[]; // match
   marks: number;
+  image?: string;
+  imagePosition?: 'beside' | 'above' | 'below';
+  imageSize?: number;
+  underlined?: { start: number; count: number }; // صحّح ما تحته خط
 }
 
 const padChoices = (c: string[] | undefined) => [...(c ?? []), '', '', '', ''].slice(0, 4);
@@ -60,6 +95,12 @@ const TYPE_OPTIONS: { value: ExamQuestionType; label: string }[] = [
   { value: 'short', label: 'إجابة قصيرة' },
 ];
 
+const SHOW_RESULT_LABEL: Record<ExamResultMode, string> = {
+  after_each: 'بعد كل محاولة',
+  end: 'بعد الانتهاء',
+  never: 'لا تظهر',
+};
+
 const STARTERS: { label: string; duration: number; count: number; type: ExamQuestionType; marks: number }[] = [
   { label: 'قصير 10د · 5 اختياري', duration: 10, count: 5, type: 'mcq', marks: 1 },
   { label: 'متوسط 30د · 10 اختياري', duration: 30, count: 10, type: 'mcq', marks: 2 },
@@ -73,6 +114,7 @@ export default function ExamsScreen() {
   const centerId = profile?.center_id ?? '';
   const [exams, setExams] = useState<AppExam[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -84,6 +126,17 @@ export default function ExamsScreen() {
   const [duration, setDuration] = useState('30');
   const [total, setTotal] = useState('');
   const [published, setPublished] = useState(false);
+  const [attemptsAllowed, setAttemptsAllowed] = useState('1');
+  const [showResult, setShowResult] = useState<ExamResultMode>('end');
+  const [targetGroupIds, setTargetGroupIds] = useState<string[]>([]);
+  const [availabilityMode, setAvailabilityMode] = useState<ExamAvailabilityMode>('always');
+  const [availableFrom, setAvailableFrom] = useState('');
+  const [availableUntil, setAvailableUntil] = useState('');
+  const [deliveryMode, setDeliveryMode] = useState<ExamDeliveryMode>('online');
+  const [onlineMode, setOnlineMode] = useState<OnlineExamMode>('mixed');
+  const [paperTemplate, setPaperTemplate] = useState<PaperTemplate>('classic');
+  const [paperFooter, setPaperFooter] = useState('');
+  const [ornaments, setOrnaments] = useState<ExamOrnaments>(blankOrnaments());
   const [questions, setQuestions] = useState<DraftQ[]>([blankQ()]);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -98,8 +151,8 @@ export default function ExamsScreen() {
   const load = useCallback(async () => {
     if (!centerId) return;
     try {
-      const [e, g, s] = await Promise.all([fetchExams(centerId), fetchGrades(centerId), fetchStudents(centerId)]);
-      setExams(e); setGrades(g); setStudents(s);
+      const [e, g, gr, s] = await Promise.all([fetchExams(centerId), fetchGrades(centerId), fetchGroups(centerId), fetchStudents(centerId)]);
+      setExams(e); setGrades(g); setGroups(gr); setStudents(s);
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
@@ -112,6 +165,10 @@ export default function ExamsScreen() {
   const openAdd = () => {
     setEditing(null); setTitle(''); setSubject(''); setGradeId(null);
     setDuration('30'); setTotal(''); setPublished(false);
+    setAttemptsAllowed('1'); setShowResult('end'); setTargetGroupIds([]);
+    setAvailabilityMode('always'); setAvailableFrom(''); setAvailableUntil('');
+    setDeliveryMode('online'); setOnlineMode('mixed'); setPaperTemplate('classic');
+    setPaperFooter(''); setOrnaments(blankOrnaments());
     setQuestions([blankQ()]); setFormError(null); setFormOpen(true);
   };
 
@@ -119,6 +176,17 @@ export default function ExamsScreen() {
     setEditing(e); setTitle(e.title); setSubject(e.subject ?? '');
     setGradeId(e.grade_id); setDuration(String(e.duration_minutes ?? 30));
     setTotal(e.total_score ? String(e.total_score) : ''); setPublished(!!e.is_published);
+    setAttemptsAllowed(String(e.attempts_allowed ?? 1));
+    setShowResult(e.show_result ?? 'end');
+    setTargetGroupIds(e.target_group_ids ?? []);
+    setAvailabilityMode(e.availability_mode ?? 'always');
+    setAvailableFrom(e.available_from ? e.available_from.slice(0, 10) : '');
+    setAvailableUntil(e.available_until ? e.available_until.slice(0, 10) : '');
+    setDeliveryMode(e.delivery_mode ?? 'online');
+    setOnlineMode(e.online_mode ?? 'mixed');
+    setPaperTemplate(e.paper_template ?? 'classic');
+    setPaperFooter(e.paper_footer ?? '');
+    setOrnaments(e.ornaments ?? blankOrnaments());
     setQuestions(e.questions.length > 0
       ? e.questions.map((raw, i) => {
         const type = (raw.type ?? 'mcq') as ExamQuestionType;
@@ -128,6 +196,10 @@ export default function ExamsScreen() {
           type,
           marks: Number((raw as { marks?: number }).marks) || 1,
           correct: 0, corrects: [] as number[], answer: '', pairs: [] as { l: string; r: string }[],
+          image: raw.image ?? undefined,
+          imagePosition: raw.imagePosition ?? 'beside',
+          imageSize: raw.imageSize ?? 160,
+          underlined: raw.underlined ?? undefined,
         };
         if (type === 'tf' || type === 'mcq') {
           return { ...base, choices: type === 'tf' ? ['صح', 'خطأ'] : padChoices(raw.choices), correct: typeof a === 'number' ? a : 0 };
@@ -169,7 +241,12 @@ export default function ExamsScreen() {
   /** بناء الأسئلة والإجابات النهائية من المسودة */
   const buildPayload = () => {
     const cleanQuestions = questions.map((q) => {
-      const base = { q: q.q.trim(), type: q.type, marks: Number(q.marks) || 1 };
+      const image = q.image?.trim() || null;
+      const base = {
+        q: q.q.trim(), type: q.type, marks: Number(q.marks) || 1,
+        ...(image ? { image, imagePosition: q.imagePosition ?? 'beside', imageSize: q.imageSize ?? 160 } : {}),
+        ...(q.type === 'correct' && q.underlined?.count ? { underlined: q.underlined } : {}),
+      };
       if (q.type === 'mcq' || q.type === 'multi') return { ...base, choices: q.choices.map((c) => c.trim()) };
       if (q.type === 'tf') return { ...base, choices: ['صح', 'خطأ'] };
       if (q.type === 'complete') return { ...base, choices: [], answer: normalizeAnswerText(q.answer) };
@@ -206,7 +283,18 @@ export default function ExamsScreen() {
           total_score: Number(total) || examMarksTotal(cleanQuestions),
           questions: cleanQuestions,
           answers,
-          is_published: published,
+          is_published: deliveryMode === 'online' && published,
+          attempts_allowed: Math.max(1, Number(attemptsAllowed) || 1),
+          show_result: showResult,
+          delivery_mode: deliveryMode,
+          online_mode: onlineMode,
+          target_group_ids: deliveryMode === 'online' ? targetGroupIds : [],
+          availability_mode: deliveryMode === 'online' ? availabilityMode : 'always',
+          available_from: deliveryMode === 'online' && availabilityMode === 'scheduled' && availableFrom.trim() ? availableFrom.trim() : null,
+          available_until: deliveryMode === 'online' && availabilityMode === 'scheduled' && availableUntil.trim() ? availableUntil.trim() : null,
+          paper_template: paperTemplate,
+          paper_footer: paperFooter,
+          ornaments,
         });
         setFormOpen(false);
         await load();
@@ -284,28 +372,19 @@ export default function ExamsScreen() {
     ]);
   };
 
-  const paperRows = (exam: AppExam) =>
-    exam.questions.map((q, i) => {
-      const t = q.type ?? 'mcq';
-      const label = EXAM_TYPE_LABEL[t] ?? t;
-      let body = '';
-      if (t === 'essay' || t === 'short' || t === 'correct') body = '(إجابة كتابية: .......................)';
-      else if (t === 'complete') body = '(أكمل: ..............................)';
-      else if (t === 'match') {
-        const pairs = q.pairs ?? [];
-        const rights = pairs.map((_, ri) => ri);
-        body = `صل: ${pairs.map((p) => p.l).join(' / ')} — مقابل: ${rights.map((ri) => pairs[ri].r).join(' / ')}`;
-      } else body = (q.choices ?? []).map((c, ci) => `${ci + 1}) ${c}`).join(' — ');
-      return [String(i + 1), `${q.q} [${label} — ${Number((q as { marks?: number }).marks) || 1} درجة]`, body];
-    });
-
   const printPaper = async (e: AppExam) => {
     try {
-      const html = buildReportHtml(`امتحان: ${e.title}`, `${e.subject} — ${e.questions.length} أسئلة — ${e.duration_minutes} دقيقة — من ${e.total_score}`, [{
-        title: 'الأسئلة (ورقية — بلا إجابات)',
-        headers: ['م', 'السؤال', 'الاختيارات'],
-        rows: paperRows(e),
-      }]);
+      const branding = await fetchReportBranding(centerId);
+      const html = buildExamPaperHtml({
+        title: e.title,
+        subject: e.subject,
+        duration: e.duration_minutes,
+        total: e.total_score,
+        questions: e.questions,
+        ornaments: e.ornaments,
+        paperFooter: e.paper_footer,
+        template: e.paper_template ?? 'classic',
+      }, { name: profile?.full_name, branding });
       await shareReportPdf(html, `امتحان ${e.title}`);
     } catch (err) {
       Alert.alert('تعذر الطباعة', arabicError(err));
@@ -350,32 +429,48 @@ export default function ExamsScreen() {
                     {item.subject || 'بدون مادة'} · {item.questions.length} سؤال
                     {item.questions.some((q) => isManualExamType(q.type)) ? ' (فيه يدوي)' : ''} · {item.duration_minutes} دقيقة · من {item.total_score} درجة
                   </Text>
+                  {(item.delivery_mode ?? 'online') === 'online' ? (
+                    <Text style={styles.examMeta}>
+                      محاولات: {item.attempts_allowed ?? 1}
+                      {' · '}النتيجة: {SHOW_RESULT_LABEL[item.show_result ?? 'end']}
+                      {item.target_group_ids && item.target_group_ids.length > 0 ? ` · ${item.target_group_ids.length} مجموعة مستهدفة` : ' · لكل الطلاب'}
+                      {item.availability_mode === 'scheduled' ? ' · موعد محدد' : ''}
+                    </Text>
+                  ) : (
+                    <Text style={styles.examMeta}>
+                      ورقي — قالب {PAPER_TEMPLATE_OPTIONS.find((t) => t.value === (item.paper_template ?? 'classic'))?.label ?? 'كلاسيكي'}
+                    </Text>
+                  )}
                 </View>
-                <View style={[styles.pubPill, { backgroundColor: item.is_published ? colors.successBg : colors.warningBg }]}>
-                  <Text style={[styles.pubText, { color: item.is_published ? colors.success : colors.warning }]}>
-                    {item.is_published ? 'منشور' : 'مسودة'}
+                <View style={[styles.pubPill, { backgroundColor: (item.delivery_mode ?? 'online') === 'paper' ? colors.infoBg : item.is_published ? colors.successBg : colors.warningBg }]}>
+                  <Text style={[styles.pubText, { color: (item.delivery_mode ?? 'online') === 'paper' ? colors.info : item.is_published ? colors.success : colors.warning }]}>
+                    {(item.delivery_mode ?? 'online') === 'paper' ? 'ورقي' : item.is_published ? 'منشور' : 'مسودة'}
                   </Text>
                 </View>
               </View>
               <View style={styles.examActions}>
-                <MiniBtn icon="eye" label="النتائج" color={colors.info} onPress={() => openAttempts(item)} />
-                {item.is_published ? (
-                  <MiniBtn
-                    icon="logo-whatsapp"
-                    label="تنبيه واتساب"
-                    color={colors.success}
-                    onPress={() => router.push(
-                      `/whatsapp?preset=exam&examTitle=${encodeURIComponent(item.title)}&examSubject=${encodeURIComponent(item.subject ?? '')}&examCount=${item.questions.length}&examMinutes=${item.duration_minutes ?? 30}`,
-                    )}
-                  />
+                {(item.delivery_mode ?? 'online') === 'online' ? (
+                  <>
+                    <MiniBtn icon="eye" label="النتائج" color={colors.info} onPress={() => openAttempts(item)} />
+                    {item.is_published ? (
+                      <MiniBtn
+                        icon="logo-whatsapp"
+                        label="تنبيه واتساب"
+                        color={colors.success}
+                        onPress={() => router.push(
+                          `/whatsapp?preset=exam&examTitle=${encodeURIComponent(item.title)}&examSubject=${encodeURIComponent(item.subject ?? '')}&examCount=${item.questions.length}&examMinutes=${item.duration_minutes ?? 30}`,
+                        )}
+                      />
+                    ) : null}
+                    <MiniBtn
+                      icon={item.is_published ? 'eye-off' : 'cloud-upload'}
+                      label={item.is_published ? 'إخفاء' : 'نشر'}
+                      color={colors.success}
+                      onPress={() => togglePublish(item)}
+                    />
+                  </>
                 ) : null}
-                <MiniBtn
-                  icon={item.is_published ? 'eye-off' : 'cloud-upload'}
-                  label={item.is_published ? 'إخفاء' : 'نشر'}
-                  color={colors.success}
-                  onPress={() => togglePublish(item)}
-                />
-                <MiniBtn icon="print" label="ورقي" color={colors.warning} onPress={() => printPaper(item)} />
+                <MiniBtn icon="print" label="ورقي PDF" color={colors.warning} onPress={() => printPaper(item)} />
                 <MiniBtn icon="create" label="تعديل" color={colors.cyan} onPress={() => openEdit(item)} />
                 <MiniBtn icon="trash" label="حذف" color={colors.danger} onPress={() => confirmDelete(item)} />
               </View>
@@ -408,10 +503,233 @@ export default function ExamsScreen() {
                   <AppInput label="الدرجة النهائية" icon="trophy" value={total} onChangeText={setTotal} keyboardType="numeric" textAlign="left" style={{ writingDirection: 'ltr' }} />
                 </View>
               </View>
-              <Pressable style={styles.pubRow} onPress={() => setPublished((v) => !v)}>
-                <Ionicons name={published ? 'checkbox' : 'square-outline'} size={22} color={published ? colors.success : colors.textMuted} />
-                <Text style={styles.pubRowText}>نشر للطلاب فور الحفظ</Text>
-              </Pressable>
+
+              <OptionPicker
+                label="مسار الاختبار"
+                icon="git-branch"
+                value={deliveryMode}
+                options={DELIVERY_OPTIONS}
+                onChange={(v) => setDeliveryMode(v as ExamDeliveryMode)}
+              />
+
+              {deliveryMode === 'online' ? (
+                <>
+                  <Text style={[styles.pubRowText, { marginBottom: spacing.sm }]}>نمط الأداء الإلكتروني</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md }}>
+                    {ONLINE_MODE_OPTIONS.map((m) => {
+                      const active = onlineMode === m.value;
+                      return (
+                        <Pressable
+                          key={m.value}
+                          style={[styles.starter, active && { backgroundColor: colors.successBg, borderColor: colors.success }]}
+                          onPress={() => setOnlineMode(m.value)}
+                        >
+                          <Text style={[styles.starterText, active && { color: colors.success }]}>{m.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <Pressable style={styles.pubRow} onPress={() => setPublished((v) => !v)}>
+                    <Ionicons name={published ? 'checkbox' : 'square-outline'} size={22} color={published ? colors.success : colors.textMuted} />
+                    <Text style={styles.pubRowText}>نشر للطلاب فور الحفظ</Text>
+                  </Pressable>
+
+                  <SectionTitle title="إعدادات الامتحان" />
+                  <View style={{ flexDirection: 'row', gap: spacing.md }}>
+                    <View style={{ flex: 1 }}>
+                      <AppInput
+                        label="عدد المحاولات المسموحة"
+                        icon="repeat"
+                        value={attemptsAllowed}
+                        onChangeText={setAttemptsAllowed}
+                        keyboardType="numeric"
+                        textAlign="left"
+                        style={{ writingDirection: 'ltr' }}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <OptionPicker
+                        label="إظهار النتيجة"
+                        icon="eye"
+                        value={showResult}
+                        options={[
+                          { value: 'after_each', label: 'بعد كل محاولة' },
+                          { value: 'end', label: 'بعد الانتهاء' },
+                          { value: 'never', label: 'لا تظهر' },
+                        ]}
+                        onChange={(v) => setShowResult(v as ExamResultMode)}
+                      />
+                    </View>
+                  </View>
+
+                  <Text style={[styles.pubRowText, { marginBottom: spacing.sm }]}>المجموعات المستهدفة (اختياري — فارغ = الكل)</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md }}>
+                    {groups.length === 0 ? (
+                      <Text style={styles.examMeta}>لا توجد مجموعات بعد</Text>
+                    ) : groups.map((g) => {
+                      const active = targetGroupIds.includes(g.id);
+                      return (
+                        <Pressable
+                          key={g.id}
+                          style={[styles.starter, active && { backgroundColor: colors.successBg, borderColor: colors.success }]}
+                          onPress={() => setTargetGroupIds((prev) => (prev.includes(g.id) ? prev.filter((id) => id !== g.id) : [...prev, g.id]))}
+                        >
+                          <Text style={[styles.starterText, active && { color: colors.success }]}>{g.name}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <OptionPicker
+                    label="توقيت الإتاحة"
+                    icon="calendar"
+                    value={availabilityMode}
+                    options={[
+                      { value: 'always', label: 'متاح دائمًا' },
+                      { value: 'scheduled', label: 'حسب موعد محدد' },
+                    ]}
+                    onChange={(v) => setAvailabilityMode(v as ExamAvailabilityMode)}
+                  />
+                  {availabilityMode === 'scheduled' ? (
+                    <View style={{ flexDirection: 'row', gap: spacing.md }}>
+                      <View style={{ flex: 1 }}>
+                        <AppInput
+                          label="متاح من (YYYY-MM-DD)"
+                          icon="calendar"
+                          placeholder="2026-01-01"
+                          value={availableFrom}
+                          onChangeText={setAvailableFrom}
+                          textAlign="left"
+                          style={{ writingDirection: 'ltr' }}
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <AppInput
+                          label="متاح حتى (YYYY-MM-DD)"
+                          icon="calendar"
+                          placeholder="2026-01-31"
+                          value={availableUntil}
+                          onChangeText={setAvailableUntil}
+                          textAlign="left"
+                          style={{ writingDirection: 'ltr' }}
+                        />
+                      </View>
+                    </View>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <AppInput
+                    label="عبارة ختام الورقة (اختياري)"
+                    icon="text"
+                    placeholder="مثال: راجع إجاباتك جيداً قبل تسليم الورقة"
+                    value={paperFooter}
+                    onChangeText={setPaperFooter}
+                    multiline
+                  />
+
+                  <SectionTitle title="قالب الورقة" />
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md }}>
+                    {PAPER_TEMPLATE_OPTIONS.map((t) => {
+                      const active = paperTemplate === t.value;
+                      return (
+                        <Pressable
+                          key={t.value}
+                          style={[styles.starter, active && { backgroundColor: colors.successBg, borderColor: colors.success }]}
+                          onPress={() => setPaperTemplate(t.value)}
+                        >
+                          <Text style={[styles.starterText, active && { color: colors.success }]}>{t.symbol} {t.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <SectionTitle title="زخارف الورقة (اختياري)" />
+                  <View style={{ flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm }}>
+                    <View style={{ flex: 1 }}>
+                      <OptionPicker
+                        label="أسلوب التوزيع"
+                        icon="apps"
+                        value={ornaments.placement}
+                        options={[
+                          { value: 'auto', label: 'تلقائي على الحواف' },
+                          { value: 'manual', label: 'يدوي (أختام)' },
+                        ]}
+                        onChange={(v) => setOrnaments((o) => ({ ...o, placement: v as ExamOrnaments['placement'] }))}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <OptionPicker
+                        label="الكثافة"
+                        icon="grid"
+                        value={ornaments.density}
+                        options={[
+                          { value: 'low', label: 'خفيفة' },
+                          { value: 'medium', label: 'متوسطة' },
+                          { value: 'high', label: 'كثيفة' },
+                        ]}
+                        onChange={(v) => setOrnaments((o) => ({ ...o, density: v as OrnamentDensity }))}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.opacityRow}>
+                    <Text style={styles.pubRowText}>شفافية الزخارف: {Math.round(ornaments.opacity * 100)}%</Text>
+                    <View style={styles.editButtons}>
+                      <Pressable
+                        style={styles.stepBtn}
+                        onPress={() => setOrnaments((o) => ({ ...o, opacity: Math.max(0.02, Math.round((o.opacity - 0.05) * 100) / 100) }))}
+                      >
+                        <Ionicons name="remove" size={16} color={colors.text} />
+                      </Pressable>
+                      <Pressable
+                        style={styles.stepBtn}
+                        onPress={() => setOrnaments((o) => ({ ...o, opacity: Math.min(0.6, Math.round((o.opacity + 0.05) * 100) / 100) }))}
+                      >
+                        <Ionicons name="add" size={16} color={colors.text} />
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  {ornaments.placement === 'manual' ? (
+                    <OrnamentStampEditor
+                      stamps={ornaments.stamps}
+                      opacity={ornaments.opacity}
+                      onChangeStamps={(stamps) => setOrnaments((o) => ({ ...o, stamps }))}
+                    />
+                  ) : (
+                    <>
+                      <AppButton
+                        title={`تعبئة حسب المادة (${subjectLabelFor(subject)})`}
+                        icon="color-palette"
+                        small
+                        variant="outline"
+                        onPress={() => setOrnaments((o) => ({ ...o, kinds: ornamentsForSubject(subject).map((orn) => orn.kind) }))}
+                      />
+                      <View style={{ height: spacing.sm }} />
+                      <Text style={[styles.pubRowText, { marginBottom: spacing.sm }]}>اختر عناصر الزخرفة (اختياري — فارغ = طقم المادة تلقائياً)</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.md }}>
+                        {ALL_ORNAMENTS.map((orn) => {
+                          const active = ornaments.kinds.includes(orn.kind);
+                          return (
+                            <Pressable
+                              key={orn.kind}
+                              style={[styles.stampChip, active && { backgroundColor: colors.successBg, borderColor: colors.success }]}
+                              onPress={() => setOrnaments((o) => ({
+                                ...o,
+                                kinds: active ? o.kinds.filter((k) => k !== orn.kind) : [...o.kinds, orn.kind],
+                              }))}
+                            >
+                              <Text style={styles.stampChipText}>{orn.glyph}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </>
+                  )}
+                </>
+              )}
 
               <SectionTitle title="قوالب بداية سريعة" />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md }}>
@@ -591,6 +909,26 @@ export default function ExamsScreen() {
                         onChangeText={(v) => setQ(i, { answer: v })}
                       />
                       <Text style={styles.correctHint}>تصحيح يدوي من شاشة النتائج — وإن كتب الطالب نفس النص حرفياً تُحسب الدرجة آلياً</Text>
+                      {q.q.trim() ? (
+                        <>
+                          <Text style={[styles.pubRowText, { marginTop: spacing.sm, marginBottom: spacing.xs }]}>اضغط الكلمة التي تريد وضع خط تحتها في الورقة</Text>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
+                            {q.q.trim().split(/\s+/).map((word, wi) => {
+                              const range = q.underlined ?? { start: 0, count: 0 };
+                              const active = range.count > 0 && wi >= range.start - 1 && wi < range.start - 1 + range.count;
+                              return (
+                                <Pressable
+                                  key={`${word}-${wi}`}
+                                  style={[styles.starter, active && { backgroundColor: colors.successBg, borderColor: colors.success }]}
+                                  onPress={() => setQ(i, { underlined: active ? { start: 0, count: 0 } : { start: wi + 1, count: 1 } })}
+                                >
+                                  <Text style={[styles.starterText, active && { color: colors.success, textDecorationLine: 'underline' }]}>{word}</Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        </>
+                      ) : null}
                     </>
                   ) : null}
 
@@ -600,6 +938,30 @@ export default function ExamsScreen() {
 
                   {q.type === 'short' ? (
                     <Text style={styles.correctHint}>إجابة قصيرة بسطر واحد — تصحيح يدوي من شاشة النتائج</Text>
+                  ) : null}
+
+                  <AppInput
+                    label="صورة السؤال (اختياري — رابط https://)"
+                    icon="image"
+                    placeholder="https://…"
+                    value={q.image ?? ''}
+                    onChangeText={(v) => setQ(i, { image: v })}
+                    autoCapitalize="none"
+                    textAlign="left"
+                    style={{ writingDirection: 'ltr' }}
+                  />
+                  {q.image?.trim() ? (
+                    <OptionPicker
+                      label="مكان الصورة"
+                      icon="locate"
+                      value={q.imagePosition ?? 'beside'}
+                      options={[
+                        { value: 'beside', label: 'بجانب السؤال (ورقي)' },
+                        { value: 'above', label: 'فوق السؤال' },
+                        { value: 'below', label: 'تحت السؤال' },
+                      ]}
+                      onChange={(v) => setQ(i, { imagePosition: v as DraftQ['imagePosition'] })}
+                    />
                   ) : null}
 
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm }}>
@@ -810,6 +1172,20 @@ const styles = themedStyles(() => StyleSheet.create({
     borderRadius: radius.md, paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
   },
   starterText: { color: colors.text, fontSize: font.xs, fontWeight: '800', textAlign: 'center' },
+  stampChip: {
+    width: 40, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
+  },
+  stampChipText: { fontSize: font.md },
+  opacityRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: spacing.sm, marginBottom: spacing.md,
+  },
+  editButtons: { flexDirection: 'row', gap: spacing.xs },
+  stepBtn: {
+    width: 32, height: 32, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+  },
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.md },
   typeChip: {
     width: '48.5%', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,

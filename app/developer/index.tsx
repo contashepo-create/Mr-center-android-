@@ -10,7 +10,7 @@ import { Alert, StyleSheet, Text, View } from 'react-native';
 import { Card, ListItem, LoadingView, SectionTitle, StatCard } from '../../src/components/controls';
 import { DeveloperGate } from '../../src/components/DeveloperGate';
 import { GradientScreen, KeyboardScreen, ScreenHeader } from '../../src/components/layout';
-import { devFetchCenters, devFetchProfilesCount } from '../../src/lib/api';
+import { devFetchCenters, devFetchProfilesCount, devFetchVisitorStats, type VisitorStats } from '../../src/lib/api';
 import { getActiveConfig } from '../../src/lib/supabase';
 import { useSession } from '../../src/lib/session';
 import { colors, font, gradients, radius, spacing, themedStyles } from '../../src/theme';
@@ -19,14 +19,18 @@ export default function DeveloperHome() {
   const { profile, ready, signOut } = useSession();
   const [centers, setCenters] = useState(0);
   const [users, setUsers] = useState({ total: 0, byRole: {} as Record<string, number> });
+  const [visitors, setVisitors] = useState<VisitorStats | null>(null);
   const cfg = getActiveConfig();
 
   // كل الـ Hooks أولاً قبل أي خروج مبكر (قواعد Hooks)
   const load = useCallback(async () => {
     try {
-      const [c, p] = await Promise.all([devFetchCenters(), devFetchProfilesCount()]);
+      const [c, p, v] = await Promise.all([
+        devFetchCenters(), devFetchProfilesCount(), devFetchVisitorStats().catch(() => null),
+      ]);
       setCenters(c.length);
       setUsers(p);
+      setVisitors(v);
     } catch { /* ignore */ }
   }, []);
 
@@ -85,6 +89,13 @@ export default function DeveloperHome() {
           />
           <StatCard icon="person" value={users.byRole['super_admin'] ?? 0} label="مطور" color={colors.danger} />
         </View>
+        {visitors ? (
+          <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
+            <StatCard icon="globe" value={visitors.total} label="إجمالي الأجهزة" color={colors.info} onPress={() => router.push('/developer/visitors')} />
+            <StatCard icon="today" value={visitors.today} label="زيارات اليوم" color={colors.success} onPress={() => router.push('/developer/visitors')} />
+            <StatCard icon="calendar" value={visitors.week} label="آخر ٧ أيام" color={colors.cyan} onPress={() => router.push('/developer/visitors')} />
+          </View>
+        ) : null}
 
         <SectionTitle title="التحكم في النظام" />
         <ListItem
@@ -129,6 +140,22 @@ export default function DeveloperHome() {
           icon="megaphone"
           iconColor={colors.danger}
           onPress={() => router.push('/developer/broadcast')}
+        />
+
+        <ListItem
+          title="الشكاوي والاقتراحات"
+          subtitle="شكاوي الزوار من صفحة «حول التطبيق» — متابعة الحالة"
+          icon="alert-circle"
+          iconColor={colors.warning}
+          onPress={() => router.push('/developer/complaints')}
+        />
+
+        <ListItem
+          title="الزوار وأصحاب السناتر"
+          subtitle="عداد الأجهزة + حجب الأجهزة المسيئة + آخر ظهور لكل صاحب سنتر"
+          icon="shield-checkmark"
+          iconColor={colors.info}
+          onPress={() => router.push('/developer/visitors')}
         />
 
         <SectionTitle title="حسابك" />

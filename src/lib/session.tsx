@@ -2,10 +2,13 @@
 // مزوّد الجلسة: تهيئة الاتصال، تتبع الدخول، تحميل الملف والاشتراك
 // ============================================================
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 import { getSupabase, initSupabase, isSupabaseReady } from './supabase';
 import { registerPushToken } from './push';
+import { touchMyAccountPresence } from './api';
+import { claimMySession, isMySessionCurrent, registerMyStudentDevice } from './sessionGuard';
 import type { MySubscription, Profile, Role } from './types';
 
 interface SessionState {
@@ -48,6 +51,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         const { data: sub } = await sb.rpc('get_my_subscription');
         setSubscription((sub as MySubscription) ?? null);
         void registerPushToken();
+        // الجلسة المستعادة لا تمر دائماً بحدث SIGNED_IN؛ سجّل جهاز الطالب
+        // دون إعادة مطالبة الجلسة حتى لا تستحوذ جلسة قديمة على جلسة أحدث.
+        if (prof.role === 'student') void registerMyStudentDevice();
+        // حضور الحساب (ومنه صاحب السنتر) — لا يسجل IP ولا يعرقل تحميل الجلسة.
+        void touchMyAccountPresence().catch(() => {});
       } else {
         setSubscription(null);
       }
@@ -94,6 +102,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setSession(data.session ?? null);
         await loadProfile(data.session ?? null);
         const { data: listener } = sb.auth.onAuthStateChange((_event, newSession) => {
+          if (_event === 'SIGNED_IN') {
+            // جلسة واحدة لكل حساب: آخر جهاز يدخل يستحوذ على الجلسة
+            void claimMySession();
+          }
           setSession(newSession);
           // تأخير بسيط حتى تكتمل معاملات التسجيل قبل قراءة الملف
           setTimeout(() => { void loadProfile(newSession); }, 0);
@@ -120,6 +132,32 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
     setSubscription(null);
   }, []);
+
+  // فحص دوري: جلسة واحدة لكل حساب — إن دخل الجهاز نفسه من جهاز آخر يُطرد فوراً.
+  // يتكرر أثناء استخدام التطبيق ويُعاد فوراً عند العودة من الخلفية.
+  const signOutRef = useRef(signOut);
+  signOutRef.current = signOut;
+  useEffect(() => {
+    if (!session || !configured) return;
+    let cancelled = false;
+    const check = async () => {
+      if (cancelled) return;
+      const current = await isMySessionCurrent();
+      if (cancelled || current) return;
+      // فقد هذا الجهاز جلسته: تسجيل خروج فوري
+      await signOutRef.current();
+    };
+    void check();
+    const timer = setInterval(() => { void check(); }, 30000);
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active') void check();
+    });
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      sub.remove();
+    };
+  }, [session, configured]);
 
   const value = useMemo<SessionState>(() => ({
     ready,

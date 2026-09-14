@@ -7,13 +7,24 @@
 // التشغيل: node scripts/audit-rpc.mjs
 // ============================================================================
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const api = readFileSync(join(root, 'src/lib/api.ts'), 'utf8');
-const sql = readFileSync(join(root, 'supabase/android_multitenant_schema.sql'), 'utf8');
+
+// نقرأ المخطط الأساسي ثم كل ترحيلات supabase/*.sql بترتيب التاريخ (بادئة الاسم)
+// ونلحقها ببعضها؛ فالدوال التي تُعرَّف فقط في ترحيل لاحق (مثل بث المطور) تُعتبر
+// معرَّفة أيضاً، ومع أخذ آخر تعريف يفوز عند إعادة تعريف دالة في ترحيل أحدث.
+const supabaseDir = join(root, 'supabase');
+const migrationFiles = readdirSync(supabaseDir)
+  .filter((f) => f.endsWith('.sql') && f !== 'android_multitenant_schema.sql')
+  .sort();
+const sql = [
+  readFileSync(join(supabaseDir, 'android_multitenant_schema.sql'), 'utf8'),
+  ...migrationFiles.map((f) => readFileSync(join(supabaseDir, f), 'utf8')),
+].join('\n');
 
 let passed = 0; let failed = 0;
 function check(name, cond, hint = '') {
@@ -33,15 +44,18 @@ while ((m = callRe.exec(api)) !== null) {
   const argBlock = m[3] ?? '';
   const args = [...argBlock.matchAll(/p_[a-z_0-9]+/g)].map((x) => x[0]);
   const uniqArgs = [...new Set(args)];
-  // تعريف الدالة في المخطط (آخر تعريف هو الفعّال مع OR REPLACE/DROP)
+  // تعريف الدالة في المخطط — قد تُعاد كتابتها بمعاملات مختلفة عبر الترحيلات
+  // (تحميل زائد باسم واحد في PostgreSQL)، لذا نجمع كل تعريفاتها ونقبل أي
+  // تعريف واحد يحوي كل وسائط الاستدعاء بدل افتراض أن آخرها هو الوحيد الصالح.
   // ملاحظة: [^)]* حتى لا تمتد المطابقة لسطور GRANT التي تليها TO لا RETURNS
   const defRe = new RegExp(`FUNCTION public\\.${fn}\\s*\\(([^)]*)\\)\\s*(RETURNS|LANGUAGE)`, 'g');
-  let dm; let lastParams = null;
-  while ((dm = defRe.exec(sql)) !== null) lastParams = dm[1];
-  check(`الدالة ${fn} معرّفة في المخطط`, lastParams !== null, 'شغّل/حدّث ملف SQL');
-  if (lastParams === null) continue;
+  let dm; const overloads = [];
+  while ((dm = defRe.exec(sql)) !== null) overloads.push(dm[1]);
+  check(`الدالة ${fn} معرّفة في المخطط`, overloads.length > 0, 'شغّل/حدّث ملف SQL');
+  if (overloads.length === 0) continue;
+  const matching = overloads.find((params) => uniqArgs.every((a) => params.includes(a)));
   for (const a of uniqArgs) {
-    check(`  ${fn}: الوسيط ${a} موجود في التعريف`, lastParams.includes(a), 'القاعدة المنشورة أقدم من التطبيق — أعد تشغيل المخطط');
+    check(`  ${fn}: الوسيط ${a} موجود في التعريف`, matching !== undefined && matching.includes(a), 'القاعدة المنشورة أقدم من التطبيق — أعد تشغيل المخطط');
   }
 }
 

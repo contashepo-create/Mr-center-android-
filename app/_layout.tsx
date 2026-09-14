@@ -11,6 +11,7 @@ import { SessionProvider, useSession } from '../src/lib/session';
 import { isOwner, isStaff } from '../src/lib/staff';
 import { getSupabase } from '../src/lib/supabase';
 import { GradientScreen } from '../src/components/layout';
+import { DeviceGate } from '../src/components/DeviceGate';
 import { UpdateManager } from '../src/components/UpdateManager';
 import { ThemeProvider, useTheme } from '../src/lib/themeContext';
 import { colors, font, spacing, themedStyles } from '../src/theme';
@@ -131,9 +132,11 @@ function AppShell() {
   return (
     // بلا مفتاح: الجلسة تبقى حية، والشجرة تُعاد رسمها عبر سياق الثيم فتتبدل الألوان فوراً
     // بلا إعادة تشغيل أو إعادة تحميل (الأنماط الحية themedStyles تتبع الوضع تلقائياً).
-    <SessionProvider>
-      <RouterGuard />
-    </SessionProvider>
+    <DeviceGate>
+      <SessionProvider>
+        <RouterGuard />
+      </SessionProvider>
+    </DeviceGate>
   );
   // mode مُستهلك عمداً كي يعاد رسم AppShell عند التبديل
   void mode;

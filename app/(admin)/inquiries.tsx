@@ -11,9 +11,9 @@ import { AppButton, AppInput, Card, EmptyState, LoadingView, NoAccess, SectionTi
 import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { FormMessage } from '../../src/components/pickers';
 import { can } from '../../src/lib/staff';
-import { fetchInquiries, fetchStudents, replyInquiry } from '../../src/lib/api';
+import { fetchGroups, fetchInquiries, fetchStudents, replyInquiry, resolveStudentTransfer } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
-import type { AppInquiry, InquiryStatus, Student } from '../../src/lib/types';
+import type { AppInquiry, Group, InquiryStatus, Student } from '../../src/lib/types';
 import { arabicError, formatDate } from '../../src/lib/utils';
 import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
@@ -45,6 +45,7 @@ export default function InquiriesScreen() {
   const centerId = profile?.center_id ?? '';
   const [items, setItems] = useState<AppInquiry[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
 
@@ -57,8 +58,8 @@ export default function InquiriesScreen() {
   const load = useCallback(async () => {
     if (!centerId) return;
     try {
-      const [inq, st] = await Promise.all([fetchInquiries(centerId), fetchStudents(centerId)]);
-      setItems(inq); setStudents(st);
+      const [inq, st, gr] = await Promise.all([fetchInquiries(centerId), fetchStudents(centerId), fetchGroups(centerId)]);
+      setItems(inq); setStudents(st); setGroups(gr);
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
@@ -67,6 +68,7 @@ export default function InquiriesScreen() {
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const studentName = (id: string | null) => students.find((s) => s.id === id)?.name ?? 'طالب محذوف';
+  const groupName = (id: string | null | undefined) => groups.find((g) => g.id === id)?.name ?? '—';
 
   const shown = filter === 'all' ? items : items.filter((i) => i.status === filter);
   const pendingCount = items.filter((i) => i.status === 'pending').length;
@@ -87,10 +89,16 @@ export default function InquiriesScreen() {
   const send = async (status: InquiryStatus) => {
     if (!current) return;
     setReplyError(null);
-    if (!reply.trim()) return setReplyError('اكتب الرد أولاً');
+    // القبول/الرفض لطلب النقل ينفَّذ خادمياً (ينقل المجموعة الأساسية ذرياً)؛ باقي الطلبات رد نصي عادي.
+    const isTransferResolution = current.kind === 'transfer' && current.status === 'pending' && (status === 'approved' || status === 'rejected');
+    if (!isTransferResolution && !reply.trim()) return setReplyError('اكتب الرد أولاً');
     setBusy(true);
     try {
-      await replyInquiry(current.id, reply, status);
+      if (isTransferResolution) {
+        await resolveStudentTransfer(current.id, status as 'approved' | 'rejected', reply);
+      } else {
+        await replyInquiry(current.id, reply, status);
+      }
       setReplyOpen(false);
       await load();
     } catch (e) {
@@ -168,7 +176,14 @@ export default function InquiriesScreen() {
                     </Text>
                   </View>
                 </View>
-                <Text style={styles.inqBody}>{item.body}</Text>
+                {item.kind === 'transfer' ? (
+                  <Text style={styles.inqBody}>
+                    نقل من «{groupName(item.from_group_id)}» إلى «{groupName(item.to_group_id)}»
+                    {item.body ? ` — ${item.body}` : ''}
+                  </Text>
+                ) : (
+                  <Text style={styles.inqBody}>{item.body}</Text>
+                )}
                 {item.reply ? (
                   <View style={styles.replyBox}>
                     <Text style={styles.replyLabel}>رد الإدارة:</Text>
@@ -191,9 +206,18 @@ export default function InquiriesScreen() {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
             <Text style={styles.modalTitle}>الرد على: {current?.subject}</Text>
-            <Text style={styles.modalBody}>{current?.body}</Text>
+            {current?.kind === 'transfer' ? (
+              <>
+                <Text style={styles.modalBody}>
+                  نقل من «{groupName(current.from_group_id)}» إلى «{groupName(current.to_group_id)}»
+                </Text>
+                <FormMessage type="info" text="القبول ينقل المجموعة الأساسية للطالب فوراً وذرياً على الخادم." />
+              </>
+            ) : (
+              <Text style={styles.modalBody}>{current?.body}</Text>
+            )}
             <AppInput
-              label="رد الإدارة"
+              label={current?.kind === 'transfer' ? 'ملاحظة للطالب (اختياري عند القبول/الرفض)' : 'رد الإدارة'}
               icon="chatbox"
               placeholder="اكتب ردك هنا..."
               value={reply}
@@ -204,7 +228,7 @@ export default function InquiriesScreen() {
             />
             {current?.kind === 'transfer' && current?.student_id ? (
               <AppButton
-                title="فتح ملف الطالب للنقل"
+                title="فتح ملف الطالب"
                 icon="person-circle"
                 small
                 variant="outline"

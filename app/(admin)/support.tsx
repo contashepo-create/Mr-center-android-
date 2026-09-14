@@ -9,7 +9,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppButton, AppInput, Card, EmptyState, LoadingView, NoAccess } from '../../src/components/controls';
 import { BackHeader, GradientScreen } from '../../src/components/layout';
-import { fetchSupportMessages, sendSupportMessage } from '../../src/lib/api';
+import { fetchSupportMessages, markMySupportMessagesRead, sendSupportMessage } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import { isOwner } from '../../src/lib/staff';
 import type { SupportMessage } from '../../src/lib/types';
@@ -29,6 +29,7 @@ export default function SupportScreen() {
     if (!centerId) { setLoading(false); return; }
     try {
       setMessages(await fetchSupportMessages(centerId));
+      await markMySupportMessagesRead(centerId).catch(() => {});
     } catch (e) {
       Alert.alert('تعذر التحميل', arabicError(e));
     } finally {

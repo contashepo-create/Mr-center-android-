@@ -36,6 +36,8 @@ export default function GroupsScreen() {
   const [billing, setBilling] = useState<BillingType>('monthly');
   const [weeklyPrice, setWeeklyPrice] = useState('');
   const [sessionPrice, setSessionPrice] = useState('');
+  const [dueMode, setDueMode] = useState<'manual' | 'attendance'>('manual');
+  const [attendanceDueAmount, setAttendanceDueAmount] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -65,6 +67,7 @@ export default function GroupsScreen() {
     setEditing(null); setName(''); setGradeId(null); setDays([]);
     setStartTime(''); setEndTime(''); setFee('');
     setBilling('monthly'); setWeeklyPrice(''); setSessionPrice('');
+    setDueMode('manual'); setAttendanceDueAmount('');
     setFormError(null);
     setFormOpen(true);
   };
@@ -82,6 +85,8 @@ export default function GroupsScreen() {
     setBilling(g.billing_type ?? 'monthly');
     setWeeklyPrice(g.weekly_price ? String(g.weekly_price) : '');
     setSessionPrice(g.session_price ? String(g.session_price) : '');
+    setDueMode(g.due_mode ?? 'manual');
+    setAttendanceDueAmount(g.attendance_due_amount ? String(g.attendance_due_amount) : '');
     setFormError(null);
     setFormOpen(true);
   };
@@ -97,6 +102,9 @@ export default function GroupsScreen() {
     }
     if (sMin !== null && eMin !== null && eMin <= sMin) {
       return setFormError('وقت النهاية يجب أن يكون بعد وقت البداية');
+    }
+    if (dueMode === 'attendance' && (Number(attendanceDueAmount) || 0) <= 0) {
+      return setFormError('أدخل قيمة موجبة للاستحقاق عند الحضور');
     }
     setBusy(true);
     try {
@@ -114,6 +122,8 @@ export default function GroupsScreen() {
         billing_type: billing,
         weekly_price: Number(weeklyPrice) || 0,
         session_price: Number(sessionPrice) || 0,
+        due_mode: dueMode,
+        attendance_due_amount: Number(attendanceDueAmount) || 0,
       });
       setFormOpen(false);
       await load();
@@ -258,6 +268,30 @@ export default function GroupsScreen() {
                 style={{ writingDirection: 'ltr' }}
               />
             )}
+            <OptionPicker
+              label="إنشاء الاستحقاق"
+              icon="cash"
+              value={dueMode}
+              options={[
+                { value: 'manual', label: 'يدوي من التحصيل' },
+                { value: 'attendance', label: 'تلقائي عند الحضور' },
+              ]}
+              onChange={(v) => setDueMode(v as 'manual' | 'attendance')}
+            />
+            {dueMode === 'attendance' ? (
+              <AppInput
+                label="قيمة الاستحقاق لكل حضور (ج.م)"
+                icon="wallet"
+                placeholder="مثال: 25"
+                value={attendanceDueAmount}
+                onChangeText={setAttendanceDueAmount}
+                keyboardType="numeric"
+                textAlign="left"
+                style={{ writingDirection: 'ltr' }}
+              />
+            ) : (
+              <Text style={styles.teacherHint}>يُنشأ الاستحقاق اليدوي من شاشة المدفوعات للفترة التي تختارها.</Text>
+            )}
             <FormMessage type="error" text={formError} />
             <AppButton title={editing ? 'حفظ التعديلات' : 'إنشاء المجموعة'} icon="checkmark" onPress={save} loading={busy} />
             <View style={{ height: spacing.sm }} />
@@ -304,6 +338,9 @@ function GroupCard({ group, gradeLabel, canManage, onEdit, onDelete }: {
         <MetaLine icon="calendar" text={formatDays(group.days)} />
         {timeLabel ? <MetaLine icon="time" text={timeLabel} /> : null}
         {priceLabel ? <MetaLine icon="wallet" text={priceLabel} /> : null}
+        {group.due_mode === 'attendance' ? (
+          <MetaLine icon="flash" text={`استحقاق تلقائي بالحضور — ${formatMoney(group.attendance_due_amount ?? 0)}`} />
+        ) : null}
         {group.teacher_name ? <MetaLine icon="person" text={`المدرس: ${group.teacher_name}`} /> : null}
       </View>
       {canManage ? (

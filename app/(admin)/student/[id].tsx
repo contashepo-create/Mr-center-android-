@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // ملف الطالب لدى مسئول السنتر: بيانات + مجموعة + درجات + دفعات
 // ============================================================
 
@@ -15,9 +15,10 @@ import {
   fetchStudentGroups, logActivity, recordPayment, removeStudentFromGroup, updateStudentGroup, type Honoree,
 } from '../../../src/lib/api';
 import { guardianReportText, openWhatsApp } from '../../../src/lib/whatsapp';
+import { disconnectStudentSession, fetchStudentDevices, setStudentDeviceBlocked, type StudentDeviceSession } from '../../../src/lib/student-access';
 import { useSession } from '../../../src/lib/session';
 import { can, isOwner } from '../../../src/lib/staff';
-import { buildReportHtml, shareReportPdf } from '../../../src/lib/report';
+import { buildReportHtml, fetchReportBranding, shareReportPdf } from '../../../src/lib/report';
 import type { Attendance, Due, ExamAttempt, Grade, Group, ManualGrade, Payment, Student } from '../../../src/lib/types';
 import { arabicError, arabicMonth, formatDate, formatDays, formatMoney, formatTimeAr } from '../../../src/lib/utils';
 import { colors, font, radius, spacing, themedStyles } from '../../../src/theme';
@@ -55,6 +56,8 @@ export default function StudentFileScreen() {
   const [gradeMax, setGradeMax] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [devices, setDevices] = useState<StudentDeviceSession[] | null>(null);
+  const [devicesBusy, setDevicesBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -210,6 +213,44 @@ export default function StudentFileScreen() {
     if (!ok) Alert.alert('تعذر الفتح', 'رقم الطالب غير صالح أو واتساب غير مثبت');
   };
 
+  const loadDevices = async () => {
+    if (!id) return;
+    setDevicesBusy(true);
+    try {
+      setDevices(await fetchStudentDevices(id));
+    } catch (e) {
+      Alert.alert('تعذر التحميل', arabicError(e));
+    } finally {
+      setDevicesBusy(false);
+    }
+  };
+
+  const toggleDeviceBlock = async (device: StudentDeviceSession) => {
+    if (!id) return;
+    setDevicesBusy(true);
+    try {
+      await setStudentDeviceBlocked(id, device.device_id, !device.blocked);
+      await loadDevices();
+    } catch (e) {
+      Alert.alert('تعذر التنفيذ', arabicError(e));
+    } finally {
+      setDevicesBusy(false);
+    }
+  };
+
+  const disconnectSession = async () => {
+    if (!id) return;
+    setDevicesBusy(true);
+    try {
+      await disconnectStudentSession(id);
+      Alert.alert('تم إنهاء الجلسة', 'سيُسجل خروجه من التطبيق عند الفحص التالي للجلسة.');
+    } catch (e) {
+      Alert.alert('تعذر التنفيذ', arabicError(e));
+    } finally {
+      setDevicesBusy(false);
+    }
+  };
+
   /** تقرير شامل زي الموقع: ترويسة + عدادات + درجات + كشف حساب + حضور + نشاط + تكريم */
   const shareReport = async () => {
     if (!student) return;
@@ -283,6 +324,7 @@ export default function StudentFileScreen() {
             rows: honors.map((h) => [h.details ?? h.name, formatDate(h.created_at)]),
           },
         ],
+        { name: profile?.full_name, branding: await fetchReportBranding(centerId) },
       );
       await shareReportPdf(html, `تقرير ${student.name}`);
     } catch (e) {
@@ -408,6 +450,43 @@ export default function StudentFileScreen() {
             </>
           ) : null}
         </Card>
+
+        {/* أجهزة ووصول الطالب — صاحب السنتر فقط */}
+        {isOwner(profile) ? (
+          <Card style={{ marginTop: spacing.md }}>
+            <View style={styles.devicesHeader}>
+              <Text style={styles.subLabel}>أجهزة ووصول الطالب</Text>
+              <View style={{ flexDirection: 'row', gap: spacing.xs }}>
+                <AppButton title={devicesBusy ? '...' : 'تحديث'} icon="refresh" small variant="outline" onPress={loadDevices} loading={devicesBusy} />
+                <AppButton title="إنهاء الجلسة" icon="log-out" small variant="ghost" onPress={disconnectSession} loading={devicesBusy} />
+              </View>
+            </View>
+            <Text style={styles.dimText}>حجب جهاز أو إنهاء جلسة الطالب يتم داخل هذا السنتر فقط، ولا يستخدم حجب أجهزة المنصة العام.</Text>
+            {devices === null ? (
+              <Text style={styles.dimText}>اضغط «تحديث» لعرض الأجهزة التي دخل منها الطالب.</Text>
+            ) : devices.length === 0 ? (
+              <Text style={styles.dimText}>لا توجد أجهزة مسجلة لهذا الطالب بعد.</Text>
+            ) : devices.map((d) => (
+              <View key={d.id} style={styles.deviceRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.deviceTitle, { color: d.blocked ? colors.danger : colors.text }]}>
+                    {d.blocked ? 'جهاز محجوب' : 'جهاز مسموح'}
+                  </Text>
+                  <Text style={styles.deviceId} numberOfLines={1}>{d.device_id}</Text>
+                  <Text style={styles.dimText}>آخر ظهور: {formatDate(d.last_seen)}{d.note ? ` · ${d.note}` : ''}</Text>
+                </View>
+                <AppButton
+                  title={d.blocked ? 'إلغاء الحجب' : 'حجب'}
+                  icon={d.blocked ? 'lock-open' : 'ban'}
+                  small
+                  variant={d.blocked ? 'outline' : 'danger'}
+                  onPress={() => toggleDeviceBlock(d)}
+                  loading={devicesBusy}
+                />
+              </View>
+            ))}
+          </Card>
+        ) : null}
 
         {/* ملخص */}
         <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md }}>
@@ -614,6 +693,13 @@ const styles = themedStyles(() => StyleSheet.create({
   okText: { color: colors.success, fontSize: font.md, fontWeight: '700', textAlign: 'center' },
   dimText: { color: colors.textMuted, fontSize: font.sm, textAlign: 'center' },
   subLabel: { color: colors.textSecondary, fontSize: font.sm, fontWeight: '700', textAlign: 'right', marginTop: spacing.md, marginBottom: spacing.xs },
+  devicesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.xs },
+  deviceRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border, marginTop: spacing.xs,
+  },
+  deviceTitle: { fontSize: font.sm, fontWeight: '800', textAlign: 'right' },
+  deviceId: { color: colors.textSecondary, fontSize: font.xs, textAlign: 'right', writingDirection: 'ltr' },
   extraRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     backgroundColor: colors.surfaceAlt, borderRadius: radius.md,

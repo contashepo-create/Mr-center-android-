@@ -4,12 +4,17 @@
 // ============================================================
 
 import { getSupabase } from './supabase';
+import { getDeviceId } from './visitors';
+import { claimMySession } from './sessionGuard';
 import { nowIso, todayIso, uuid } from './utils';
+import { brandForCenter, DEFAULT_CENTER_PRINT_SETTINGS, normalizeCenterPrintSettings, type CenterPrintBranding } from './printing';
 import type {
   Announcement, AppExam, AppInquiry, AppNotification, AppSurvey, AppSurveyResponse, Attendance, AttendanceStatus,
-  BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, FiscalYear, Grade, StaffInvite,
+  BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, FiscalYear, Grade, StaffDeduction, StaffInviteRow,
   ExamAnswer, ExamQuestion, ExamQuestionType, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
-  PublishedExam, SessionRecord, Student, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
+  PublishedExam, SessionRecord, Student, StudentAccount, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
+  DeveloperBroadcastChannel, CenterBroadcastDelivery, DeveloperBroadcastPresentation, DeveloperBroadcastResult, CommunicationSummary,
+  SurveyAnswer, SurveyQuestion,
 } from './types';
 
 // ------------------------------------------------------------
@@ -17,11 +22,27 @@ import type {
 // ------------------------------------------------------------
 
 export async function loginWithEmail(email: string, password: string) {
-  const { data, error } = await getSupabase().auth.signInWithPassword({
-    email: email.trim().toLowerCase(),
-    password,
-  });
-  if (error) throw error;
+  const normalized = email.trim().toLowerCase();
+  const device = await getDeviceId();
+  const sb = getSupabase();
+
+  // حماية خادمية من تخمين كلمات المرور: يمنع تجاوز الحد قبل محاولة الدخول
+  try {
+    await sb.rpc('check_login_allowed', { p_email: normalized, p_device: device || null });
+  } catch (e) {
+    // إن لم يكن الترحيل مطبقاً بعد نتجاهل الخطأ ولا نمنع الدخول
+    if (String((e as any)?.message ?? '').includes('login_rate_limited')) throw e;
+  }
+
+  const { data, error } = await sb.auth.signInWithPassword({ email: normalized, password });
+  if (error) {
+    try { await sb.rpc('record_login_attempt', { p_email: normalized, p_device: device || null, p_success: false }); } catch { /* تجاهل */ }
+    throw error;
+  }
+  try { await sb.rpc('record_login_attempt', { p_email: normalized, p_device: device || null, p_success: true }); } catch { /* تجاهل */ }
+
+  // جلسة واحدة لكل حساب: هذا الجهاز يستحوذ على الجلسة ويُخرج أي جهاز آخر
+  await claimMySession();
   return data;
 }
 
@@ -299,11 +320,11 @@ export async function createStaffInvite(input: {
   throw new Error('تعذر توليد كود فريد — حاول مجدداً');
 }
 
-export async function fetchStaffInvites(centerId: string): Promise<StaffInvite[]> {
+export async function fetchStaffInvites(centerId: string): Promise<StaffInviteRow[]> {
   const { data, error } = await getSupabase().from('staff_invites').select('*')
     .eq('center_id', centerId).order('created_at', { ascending: false }).limit(100);
   if (error) throw error;
-  return (data ?? []) as StaffInvite[];
+  return (data ?? []) as StaffInviteRow[];
 }
 
 export async function revokeStaffInvite(id: string): Promise<void> {
@@ -407,12 +428,187 @@ export async function closeFiscalYear(year: number): Promise<void> {
   if (error) throw error;
 }
 
+/** إيراد أو مصروف يدوي عام (لا يشمل الرواتب/السلف/العمولات، ولها RPCs مخصصة) */
+export async function recordManualLedgerEntry(input: {
+  centerId: string; kind: 'income' | 'expense'; category: string; description?: string; amount: number; date?: string;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('record_manual_ledger_entry', {
+    p_center: input.centerId, p_kind: input.kind, p_category: input.category.trim(),
+    p_description: input.description?.trim() || '', p_amount: input.amount,
+    p_date: input.date || todayIso(),
+  });
+  if (error) throw error;
+}
+
+/** سلفة نقدية لموظف — لا تُحسب مصروف تشغيل حتى تُسوّى مع راتب */
+export async function recordStaffAdvance(input: {
+  centerId: string; employeeId: string; amount: number; date?: string; description?: string;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('record_staff_advance', {
+    p_center: input.centerId, p_employee: input.employeeId, p_amount: input.amount,
+    p_date: input.date || todayIso(), p_description: input.description?.trim() || '',
+  });
+  if (error) throw error;
+}
+
+/** صرف راتب موظف (أساسي + مكافأة + عمولة) بعد خصم سلفة/خصم معتمدين */
+export async function recordPayrollSettlement(input: {
+  centerId: string; employeeId: string; baseSalary: number; bonus?: number; commission?: number;
+  advanceApplied?: number; deduction?: number; date?: string; description?: string;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('record_payroll_settlement', {
+    p_center: input.centerId, p_employee: input.employeeId, p_base_salary: input.baseSalary,
+    p_bonus: input.bonus ?? 0, p_commission: input.commission ?? 0,
+    p_advance_applied: input.advanceApplied ?? 0, p_deduction: input.deduction ?? 0,
+    p_date: input.date || todayIso(), p_description: input.description?.trim() || '',
+  });
+  if (error) throw error;
+}
+
+/** صرف عمولة تحصيل منفصلة عن الراتب */
+export async function recordStaffCommissionPayment(input: {
+  centerId: string; employeeId: string; amount: number; date?: string; description?: string;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('record_staff_commission_payment', {
+    p_center: input.centerId, p_employee: input.employeeId, p_amount: input.amount,
+    p_date: input.date || todayIso(), p_description: input.description?.trim() || '',
+  });
+  if (error) throw error;
+}
+
+/** خصومات موظف معلّقة (لم تُسدَّد كلياً بعد) — تُعرض ليختار المسئول ما يطبّقه عند صرف الراتب */
+export async function fetchStaffDeductions(centerId: string): Promise<StaffDeduction[]> {
+  const { data, error } = await getSupabase().from('staff_deductions').select('*')
+    .eq('center_id', centerId).order('occurred_on', { ascending: false }).order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as StaffDeduction[];
+}
+
+/** تسجيل خصم جديد معلّق على موظف — التزام لا يُخصم من الدفتر إلا عند صرف راتبه */
+export async function recordStaffDeduction(input: {
+  centerId: string; employeeId: string; amount: number; reason: string; date?: string; notes?: string;
+}): Promise<string> {
+  const { data, error } = await getSupabase().rpc('record_staff_deduction', {
+    p_center: input.centerId, p_employee: input.employeeId, p_amount: input.amount,
+    p_reason: input.reason.trim(), p_date: input.date || todayIso(), p_notes: input.notes?.trim() || '',
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+/** تعديل خصم موظف قائم — لا يقبل تخفيض المبلغ عن الجزء المسدَّد فعلاً (يتحقق منه الخادم) */
+export async function amendStaffDeduction(input: {
+  deductionId: string; amount: number; reason: string; notes?: string; date: string;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('amend_staff_deduction', {
+    p_deduction: input.deductionId, p_amount: input.amount, p_reason: input.reason.trim(),
+    p_notes: input.notes?.trim() || '', p_date: input.date,
+  });
+  if (error) throw error;
+}
+
+/**
+ * صرف راتب موظف مع اختيار سلف/خصومات محددة بالمعرف (نسخة كاملة من RPC صرف الراتب
+ * تطابق تماماً منطق الويب — تسمح باختيار أي مجموعة سلف/خصومات معلّقة وتسويتها ذرّياً
+ * ضمن نفس معاملة صرف الراتب، بخلاف recordPayrollSettlement المبسّطة أعلاه).
+ */
+export async function recordSalaryPayment(input: {
+  centerId: string; employeeId: string; baseSalary: number; bonus?: number; commission?: number;
+  advanceApplied?: number; deductionApplied?: number; deductionIds?: string[]; date?: string; description?: string;
+}): Promise<string> {
+  const { data, error } = await getSupabase().rpc('record_salary_payment', {
+    p_center: input.centerId, p_employee: input.employeeId, p_base_salary: input.baseSalary,
+    p_bonus: input.bonus ?? 0, p_commission: input.commission ?? 0,
+    p_advance_applied: input.advanceApplied ?? 0, p_deduction_applied: input.deductionApplied ?? 0,
+    p_deduction_ids: input.deductionIds ?? [], p_date: input.date || todayIso(),
+    p_description: input.description?.trim() || '',
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+/**
+ * تصحيح قيد دفتر أُدخل يدوياً (تاريخ/تصنيف/بيان/مبلغ). تحصيل الطالب لا يُعدَّل هنا
+ * (يعدَّل من شاشة التحصيل بمصدره الأصلي)، وصرف الراتب لا يقبل تغيير المبلغ لارتباطه
+ * بسلف وخصومات مسوّاة — مرر p_amount بقيمة null في هذه الحالة (يتحقق منها الخادم أيضاً).
+ */
+export async function amendAccountingLedgerEntry(input: {
+  entryId: string; date: string; category: string; description: string; amount: number | null;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('amend_accounting_ledger_entry', {
+    p_entry: input.entryId, p_date: input.date, p_category: input.category.trim(),
+    p_description: input.description.trim(), p_amount: input.amount,
+  });
+  if (error) throw error;
+}
+
+/** صف عهدة يومي (تحصيل متوقع + تسليم فعلي + نتيجة المطابقة) */
+export interface CustodyRow {
+  id: string | null;
+  staff_id: string | null;
+  staff_name: string;
+  custody_date: string;
+  expected_amount: number;
+  delivered_amount: number;
+  status: 'open' | 'submitted' | 'matched' | 'shortage' | 'surplus';
+  notes: string;
+  submitted_at: string | null;
+  created_at: string | null;
+  shortage_resolved_amount: number;
+  shortage_resolution: '' | 'expense' | 'deduction' | 'mixed';
+  shortage_resolution_note: string;
+  shortage_resolved_at: string | null;
+}
+
+/** كشف العهدة الكامل: تحصيل متوقع يظهر فوراً حتى قبل التسليم + حالة كل تسليم */
+export async function fetchCustodyOverview(fromDate?: string | null, toDate?: string | null): Promise<CustodyRow[]> {
+  const { data, error } = await getSupabase().rpc('get_custody_overview', {
+    p_from: fromDate ?? null, p_to: toDate ?? null,
+  });
+  if (error) throw error;
+  return (data ?? []) as CustodyRow[];
+}
+
+/** تسليم عهدة الموظف نفسه (يحسب تلقائياً المتوقع من تحصيله اليومي) */
+export async function submitStaffCustody(input: {
+  staffId: string; date?: string; delivered: number; notes?: string;
+}): Promise<void> {
+  const { error } = await getSupabase().rpc('submit_staff_custody', {
+    p_staff: input.staffId, p_date: input.date || todayIso(),
+    p_delivered: input.delivered, p_notes: input.notes?.trim() || '',
+  });
+  if (error) throw error;
+}
+
+/** اعتماد/مراجعة تسليم عهدة موظف من المالك — يحدد مطابقة/عجز/زيادة تلقائياً */
+export async function settleStaffCustody(input: {
+  centerId: string; staffId: string; date: string; delivered: number; notes?: string;
+}): Promise<string> {
+  const { data, error } = await getSupabase().rpc('settle_staff_custody', {
+    p_center: input.centerId, p_staff: input.staffId, p_date: input.date,
+    p_delivered: input.delivered, p_notes: input.notes?.trim() || '',
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+/** تسوية عجز عهدة مسجّل: إما مصروف على السنتر أو خصم على صاحب العهدة */
+export async function resolveStaffCustodyShortage(input: {
+  custodyId: string; method: 'expense' | 'deduction'; amount: number; note?: string;
+}): Promise<{ ledger_id: string | null; deduction_id: string | null; remaining: number }> {
+  const { data, error } = await getSupabase().rpc('resolve_staff_custody_shortage', {
+    p_custody: input.custodyId, p_method: input.method, p_amount: input.amount, p_note: input.note?.trim() || '',
+  });
+  if (error) throw error;
+  return data as { ledger_id: string | null; deduction_id: string | null; remaining: number };
+}
+
 /** (المطور) دعوات فريق العمل — للعرض والسحب في شاشة الفريق */
-export async function devListInvites(centerId: string): Promise<StaffInvite[]> {
+export async function devListInvites(centerId: string): Promise<StaffInviteRow[]> {
   const { data, error } = await getSupabase().from('staff_invites').select('id,center_id,code,name,phone,role,status,created_at')
     .eq('center_id', centerId).order('created_at', { ascending: false }).limit(30);
   if (error) throw error;
-  return (data ?? []) as StaffInvite[];
+  return (data ?? []) as StaffInviteRow[];
 }
 
 export async function deleteTeacher(id: string): Promise<void> {
@@ -500,7 +696,7 @@ export async function fetchMyCenter(centerId: string): Promise<Center | null> {
 
 export async function fetchGrades(centerId: string): Promise<Grade[]> {
   const { data, error } = await getSupabase()
-    .from('grades').select('*').eq('center_id', centerId).order('created_at');
+    .from('grades').select('*').eq('center_id', centerId).order('sort_order').order('created_at');
   if (error) throw error;
   return (data ?? []) as Grade[];
 }
@@ -529,6 +725,24 @@ export async function updateGrade(id: string, name: string): Promise<void> {
   if (error) throw error;
 }
 
+/** تحريك صف لأعلى/أسفل ضمن ترتيب المراحل */
+export async function moveGrade(id: string, dir: -1 | 1): Promise<void> {
+  const sb = getSupabase();
+  const { data: current } = await sb.from('grades').select('center_id, sort_order').eq('id', id).maybeSingle();
+  if (!current) return;
+  const order = current.sort_order;
+  const cmp = dir < 0 ? 'lt' : 'gt';
+  const { data: neighbor } = await sb.from('grades')
+    .select('id, sort_order').eq('center_id', current.center_id)
+    .neq('id', id)
+    .filter('sort_order', cmp, order)
+    .order('sort_order', { ascending: dir < 0 })
+    .limit(1).maybeSingle();
+  if (!neighbor) return;
+  await sb.from('grades').update({ sort_order: neighbor.sort_order }).eq('id', id);
+  await sb.from('grades').update({ sort_order: order }).eq('id', neighbor.id);
+}
+
 export async function fetchGroups(centerId: string): Promise<Group[]> {
   const { data, error } = await getSupabase()
     .from('groups').select('*').eq('center_id', centerId).order('name');
@@ -550,6 +764,8 @@ export async function upsertGroup(centerId: string, group: Partial<Group> & { na
     billing_type: group.billing_type ?? 'monthly',
     weekly_price: group.weekly_price ?? 0,
     session_price: group.session_price ?? 0,
+    due_mode: group.due_mode ?? 'manual',
+    attendance_due_amount: group.attendance_due_amount ?? 0,
   };
   if (group.id) {
     const { error } = await getSupabase().from('groups').update(payload).eq('id', group.id);
@@ -667,8 +883,13 @@ export async function saveAttendance(
     created_at: byStudent.get(r.student_id)?.created_at ?? nowIso(),
   }));
   if (upserts.length === 0) return;
-  const { error } = await getSupabase().from('attendance').upsert(upserts);
+  const sb = getSupabase();
+  const { error } = await sb.from('attendance').upsert(upserts);
   if (error) throw error;
+  // الدالة خادمية وidempotent: لا تنشئ مستحقين للحصة نفسها لمجموعات الاستحقاق
+  // بالحضور، وتطبق الرصيد المقدم تلقائياً. لا تأثير على مجموعات الاستحقاق اليدوي.
+  const { error: duesError } = await sb.rpc('sync_attendance_dues_for_session', { p_center: centerId, p_session: sessionId });
+  if (duesError) throw duesError;
 }
 
 // ---------- المدفوعات والمستحقات ----------
@@ -680,28 +901,20 @@ export async function fetchDues(centerId: string, month: number, year: number): 
   return (data ?? []) as Due[];
 }
 
-/** توليد استحقاقات شهرية لكل طلاب مجموعة (يتجاوز الموجود مسبقاً) */
+/** توليد استحقاقات شهرية لكل طلاب مجموعة (يتجاوز الموجود مسبقاً) — خادمياً وذرياً عبر RPC */
 export async function generateDuesForGroup(
   centerId: string, group: Group, month: number, year: number,
 ): Promise<{ created: number; amount: number; skippedNoSessions: boolean }> {
-  const inGroup = await fetchGroupMembers(centerId, group.id);
-  if (inGroup.length === 0) return { created: 0, amount: 0, skippedNoSessions: false };
-  const amount = await dueAmountForGroup(centerId, group, month, year);
-  if (amount === null) return { created: 0, amount: 0, skippedNoSessions: true };
-  const existing = await fetchDues(centerId, month, year);
-  // طالب المجموعتين يستحق عن كل مجموعة على حدة (المفتاح طالب+مجموعة)
-  const existingKeys = new Set(existing.filter((d) => d.group_id === group.id).map((d) => d.student_id));
-  const rows = inGroup
-    .filter((s) => !existingKeys.has(s.id))
-    .map((s) => ({
-      id: uuid(), center_id: centerId, student_id: s.id, group_id: group.id,
-      month, year, amount, status: 'pending', created_at: nowIso(),
-    }));
-  if (rows.length > 0) {
-    const { error } = await getSupabase().from('dues').insert(rows);
-    if (error) throw error;
-  }
-  return { created: rows.length, amount, skippedNoSessions: false };
+  const { data, error } = await getSupabase().rpc('generate_manual_dues_for_group', {
+    p_center: centerId, p_group: group.id, p_month: month, p_year: year,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as { created?: number; amount?: number; skipped_no_sessions?: boolean };
+  return {
+    created: Number(result.created ?? 0),
+    amount: Number(result.amount ?? 0),
+    skippedNoSessions: Boolean(result.skipped_no_sessions),
+  };
 }
 
 /** مبلغ الاستحقاق حسب نظام التسعير — null إن كان بالحصة ولا حصص مسجلة بعد */
@@ -787,7 +1000,7 @@ export async function fetchPaymentsForStudent(studentId: string): Promise<Paymen
 
 export async function fetchDuesForStudent(studentId: string): Promise<Due[]> {
   const { data, error } = await getSupabase().from('dues').select('*')
-    .eq('student_id', studentId).order('year', { ascending: false }).order('month', { ascending: false }).limit(60);
+    .eq('student_id', studentId).order('due_year', { ascending: false }).order('month', { ascending: false }).limit(60);
   if (error) throw error;
   return (data ?? []) as Due[];
 }
@@ -796,46 +1009,66 @@ export async function recordPayment(input: {
   centerId: string; studentId: string; dueId?: string | null;
   amount: number; month: number; year: number; notes?: string;
 }): Promise<void> {
-  const sb = getSupabase();
-  const { data: authData } = await sb.auth.getUser();
-  const actorId = authData.user?.id ?? null;
-  const { data: actor } = actorId ? await sb.from('profiles').select('full_name').eq('id', actorId).maybeSingle() : { data: null };
+  const amount = Number(input.amount);
+  if (!amount || amount <= 0) throw new Error('invalid_payment_amount');
+  if (input.month < 1 || input.month > 12 || input.year < 2000) throw new Error('invalid_payment_period');
 
-  if (input.dueId) {
-    // استخدام RPC الذري للتحقق من المستحق وتخزين هوية المحصل
-    const { error } = await sb.rpc('record_payment', {
-      p_due_id: input.dueId,
-      p_amount: input.amount,
-      p_collected_by: actorId,
-      p_collected_by_name: actor?.full_name ?? '',
-    });
-    if (error) throw error;
-  } else {
-    // دفعة بدون مستحق (تسجيل يدوي)
-    const { error } = await sb.from('payments').insert({
-      id: uuid(), center_id: input.centerId, student_id: input.studentId,
-      collected_by: actorId, collected_by_name: actor?.full_name ?? '',
-      due_id: null, amount: input.amount,
-      payment_date: todayIso(), month: input.month, year: input.year,
-      notes: input.notes?.trim() || null, created_at: nowIso(),
-    });
-    if (error) throw error;
-  }
+  // التحصيل يتم خادمياً ذرياً عبر record_payment RPC:
+  // يقفل صف المستحق ويمنع السباق (Race Condition) وتجاوز المبلغ من جهازين في نفس اللحظة،
+  // ويطبق أي رصيد مقدم على المستحقات القائمة تلقائياً عند التحصيل بلا مستحق محدد.
+  const { error } = await getSupabase().rpc('record_payment', {
+    p_center: input.centerId,
+    p_student: input.studentId,
+    p_due: input.dueId ?? null,
+    p_amount: amount,
+    p_month: input.month,
+    p_year: input.year,
+    p_notes: input.notes?.trim() || null,
+  });
+  if (error) throw error;
+}
 
-  if (input.dueId) {
-    // تحديث حالة المستحق (paid/partial)
-    const { data: due } = await sb.from('dues').select('amount').eq('id', input.dueId).maybeSingle();
-    const { data: paidRows } = await sb.from('payments').select('amount').eq('due_id', input.dueId);
-    const totalPaid = (paidRows ?? []).reduce((s, r) => s + Number(r.amount), 0);
-    let status: string;
-    if (due && totalPaid >= Number(due.amount)) {
-      status = 'paid';
-    } else {
-      status = 'partial';
-    }
-    const { error: dueErr } = await sb.from('dues').update({ status }).eq('id', input.dueId);
-    if (dueErr) throw dueErr;
-  }
+/** تحصيل مقدم للطالب: يظهر رصيداً دائنًا ويُطبّق تلقائياً على مستحق قائم إن وجد. */
+export async function recordStudentCredit(input: {
+  centerId: string; studentId: string; amount: number; month: number; year: number; notes?: string;
+}): Promise<void> {
+  await recordPayment({ ...input, dueId: null });
+}
+
+/** تحصيل المستحقات المختارة من مجموعة في معاملة واحدة؛ الاختيار نفسه لا يحفظ شيئاً. */
+export async function recordBulkDuePayments(input: {
+  centerId: string; month: number; year: number; items: { dueId: string; amount: number }[]; notes?: string;
+}): Promise<{ count: number; total: number }> {
+  if (input.items.length === 0) throw new Error('اختر طالباً واحداً على الأقل.');
+  const { data, error } = await getSupabase().rpc('record_bulk_due_payments', {
+    p_center: input.centerId,
+    p_month: input.month,
+    p_year: input.year,
+    p_items: input.items.map((item) => ({ due_id: item.dueId, amount: item.amount })),
+    p_notes: input.notes?.trim() || null,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as { count?: number; total?: number };
+  return { count: Number(result.count ?? 0), total: Number(result.total ?? 0) };
+}
+
+/** كشف حساب طالب شامل: مستحقات + رصيد دائن + تسويات سابقة. */
+export async function fetchStudentAccount(centerId: string, studentId: string): Promise<StudentAccount> {
+  const { data, error } = await getSupabase().rpc('get_student_account', { p_center: centerId, p_student: studentId });
+  if (error) throw error;
+  return data as StudentAccount;
+}
+
+/** تسوية حساب الطالب إلى صفر: يصفّر الرصيد الدائن والمديونية دون تسجيل دفعة/إيراد جديد. */
+export async function settleStudentAccount(
+  centerId: string, studentId: string, notes?: string,
+): Promise<{ creditSettled: number; debtSettled: number }> {
+  const { data, error } = await getSupabase().rpc('settle_student_account', {
+    p_center: centerId, p_student: studentId, p_notes: notes?.trim() || null,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as { credit_settled?: number; debt_settled?: number };
+  return { creditSettled: Number(result.credit_settled ?? 0), debtSettled: Number(result.debt_settled ?? 0) };
 }
 
 export async function updateStudentGroup(studentId: string, groupId: string | null, gradeId: string | null): Promise<void> {
@@ -927,7 +1160,7 @@ export async function fetchAdminStats(centerId: string): Promise<AdminStats> {
     sb.from('dues').select('id', { count: 'exact', head: true })
       .eq('center_id', centerId).eq('status', 'pending'),
     sb.from('payments').select('amount')
-      .eq('center_id', centerId).eq('month', now.getMonth() + 1).eq('year', now.getFullYear()),
+      .eq('center_id', centerId).eq('month', now.getMonth() + 1).eq('payment_year', now.getFullYear()),
   ]);
   const { data: todaySessions } = await sb.from('sessions').select('id')
     .eq('center_id', centerId).eq('session_date', today);
@@ -1057,6 +1290,17 @@ export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
     answers: exam.answers,
     total_score: total,
     is_published: exam.is_published ?? false,
+    attempts_allowed: exam.attempts_allowed ?? 1,
+    show_result: exam.show_result ?? 'end',
+    delivery_mode: exam.delivery_mode ?? 'online',
+    online_mode: exam.online_mode ?? 'mixed',
+    target_group_ids: exam.target_group_ids ?? [],
+    availability_mode: exam.availability_mode ?? 'always',
+    available_from: exam.availability_mode === 'scheduled' ? exam.available_from ?? null : null,
+    available_until: exam.availability_mode === 'scheduled' ? exam.available_until ?? null : null,
+    paper_template: exam.paper_template ?? 'classic',
+    paper_footer: exam.paper_footer ?? '',
+    ornaments: exam.ornaments ?? null,
   };
   if (exam.id) {
     const { error } = await getSupabase().from('app_exams').update(payload).eq('id', exam.id);
@@ -1086,14 +1330,24 @@ export async function fetchPublishedExams(): Promise<PublishedExam[]> {
   return (data ?? []) as PublishedExam[];
 }
 
-export async function submitExam(examId: string, answers: ExamAnswer[]): Promise<{
-  score: number; max_score: number; correct: number; total: number; status: string;
-}> {
+export interface ExamResult {
+  score: number;
+  max_score: number;
+  correct: number;
+  total: number;
+  status: string;
+  attempts_used?: number;
+  attempts_allowed?: number;
+  /** مراجعة سؤال بسؤال؛ model = الإجابة النموذجية (إن أُرفقت من الخادم) */
+  per_question?: { q: number; correct: boolean | null; earned: number; marks: number; model?: ExamAnswer }[];
+}
+
+export async function submitExam(examId: string, answers: ExamAnswer[]): Promise<ExamResult> {
   const { data, error } = await getSupabase().rpc('submit_exam_attempt', {
     p_exam_id: examId, p_answers: answers,
   });
   if (error) throw error;
-  return data as { score: number; max_score: number; correct: number; total: number; status: string };
+  return data as ExamResult;
 }
 
 /** تصحيح يدوي لمحاولة فيها مقالي (المعلم يضع الدرجة النهائية) */
@@ -1139,10 +1393,13 @@ export async function fetchMyInquiries(studentId: string): Promise<AppInquiry[]>
 
 export async function addInquiry(input: {
   centerId: string; studentId: string; kind: InquiryKind; subject: string; body: string;
+  fromGroupId?: string | null; toGroupId?: string | null;
 }): Promise<void> {
   const { error } = await getSupabase().from('app_inquiries').insert({
     id: uuid(), center_id: input.centerId, student_id: input.studentId,
     kind: input.kind, subject: input.subject.trim(), body: input.body.trim(),
+    from_group_id: input.kind === 'transfer' ? input.fromGroupId ?? null : null,
+    to_group_id: input.kind === 'transfer' ? input.toGroupId ?? null : null,
     status: 'pending', created_at: nowIso(), updated_at: nowIso(),
   });
   if (error) throw error;
@@ -1151,6 +1408,14 @@ export async function addInquiry(input: {
 export async function replyInquiry(id: string, reply: string, status: InquiryStatus): Promise<void> {
   const { error } = await getSupabase().from('app_inquiries')
     .update({ reply: reply.trim(), status, updated_at: nowIso() }).eq('id', id);
+  if (error) throw error;
+}
+
+/** قبول/رفض طلب نقل موثق؛ القبول يغيّر المجموعة الأساسية داخل RPC ذرية. */
+export async function resolveStudentTransfer(id: string, status: 'approved' | 'rejected', reply = ''): Promise<void> {
+  const { error } = await getSupabase().rpc('resolve_student_transfer', {
+    p_inquiry_id: id, p_status: status, p_reply: reply.trim() || null,
+  });
   if (error) throw error;
 }
 
@@ -1173,13 +1438,21 @@ export async function fetchActiveSurveys(centerId: string): Promise<AppSurvey[]>
 }
 
 export async function upsertSurvey(centerId: string, survey: Partial<AppSurvey> & {
-  title: string; questions: string[];
+  title: string; questions: SurveyQuestion[];
 }): Promise<void> {
   const payload = {
     center_id: centerId,
     title: survey.title.trim(),
-    questions: survey.questions.map((q) => q.trim()).filter(Boolean),
+    description: (survey.description ?? '').trim(),
+    questions: survey.questions,
+    audience: survey.audience ?? 'all',
+    grade_id: survey.audience === 'grade' ? survey.grade_id ?? null : null,
+    group_ids: survey.audience === 'group' ? survey.group_ids ?? [] : [],
     is_active: survey.is_active ?? true,
+    anonymous: survey.anonymous ?? false,
+    lock_after_submit: survey.lock_after_submit ?? false,
+    deadline: survey.deadline || null,
+    version: survey.version ?? 1,
   };
   if (survey.id) {
     const { error } = await getSupabase().from('app_surveys').update(payload).eq('id', survey.id);
@@ -1204,14 +1477,19 @@ export async function toggleSurvey(id: string, active: boolean): Promise<void> {
 }
 
 export async function submitSurveyResponse(input: {
-  centerId: string; surveyId: string; studentId: string; answers: string[];
+  centerId: string; surveyId: string; studentId: string; answers: Record<string, SurveyAnswer>;
+  lockAfterSubmit?: boolean;
 }): Promise<void> {
-  const { error } = await getSupabase().from('app_survey_responses').insert({
+  // ردّ واحد لكل طالب في كل استبيان: إن كان القفل مفعّلاً نرفض التكرار،
+  // وإلا نُحدّث ردّه السابق بدل إدراج صف ثانٍ.
+  const { error } = await getSupabase().from('app_survey_responses').upsert({
     id: uuid(), center_id: input.centerId, survey_id: input.surveyId,
     student_id: input.studentId, answers: input.answers,
-  });
+  }, { onConflict: 'survey_id,student_id' });
   if (error) {
-    if (String((error as any)?.message ?? '').includes('duplicate key')) throw new Error('already_answered');
+    if (input.lockAfterSubmit && String((error as any)?.message ?? '').includes('duplicate key')) {
+      throw new Error('already_answered');
+    }
     throw error;
   }
 }
@@ -1221,6 +1499,18 @@ export async function fetchSurveyResponses(surveyId: string): Promise<AppSurveyR
     .eq('survey_id', surveyId).order('created_at', { ascending: false }).limit(500);
   if (error) throw error;
   return (data ?? []) as AppSurveyResponse[];
+}
+
+/** أعداد الردود لكل استبيان، لتظهر حالة المشاركة في القائمة دون فتح كل استبيان. */
+export async function fetchSurveyResponseCounts(centerId: string): Promise<Record<string, number>> {
+  const { data, error } = await getSupabase().from('app_survey_responses').select('survey_id')
+    .eq('center_id', centerId).limit(5000);
+  if (error) throw error;
+  return (data ?? []).reduce<Record<string, number>>((counts, row) => {
+    const id = String((row as { survey_id?: string }).survey_id ?? '');
+    if (id) counts[id] = (counts[id] ?? 0) + 1;
+    return counts;
+  }, {});
 }
 
 export async function fetchMySurveyResponses(studentId: string): Promise<AppSurveyResponse[]> {
@@ -1233,6 +1523,74 @@ export async function fetchMySurveyResponses(studentId: string): Promise<AppSurv
 // ------------------------------------------------------------
 // الإشعارات الداخلية (بث جماعي بضغطة: صف واحد لكل رسالة)
 // ------------------------------------------------------------
+
+/** بث المطور بالقنوات الخمس؛ الخادم وحده يحدد السناتر والحسابات المستهدفة. */
+export async function developerBroadcastNotification(input: {
+  channel: DeveloperBroadcastChannel;
+  title: string;
+  body: string;
+  centerId?: string | null;
+  centerDelivery?: CenterBroadcastDelivery | null;
+  presentation?: DeveloperBroadcastPresentation;
+}): Promise<DeveloperBroadcastResult> {
+  const { data, error } = await getSupabase().rpc('developer_broadcast_notification', {
+    p_channel: input.channel,
+    p_title: input.title.trim(),
+    p_body: input.body.trim(),
+    p_center: input.centerId || null,
+    p_center_delivery: input.centerDelivery || null,
+    p_presentation: input.presentation ?? 'notification',
+  });
+  if (error) throw error;
+  return data as DeveloperBroadcastResult;
+}
+
+/** يحدث عدادات الشريط العلوي فور القراءة/الرد، من دون انتظار إعادة تحميل الشاشة. */
+const communicationListeners = new Set<() => void>();
+export function notifyCommunicationChanged(): void {
+  communicationListeners.forEach((fn) => fn());
+}
+export function subscribeCommunicationChanged(fn: () => void): () => void {
+  communicationListeners.add(fn);
+  return () => communicationListeners.delete(fn);
+}
+
+/** صندوق رسائل المطور المفلتر لصاحب السنتر أو الموظف النشط. */
+export async function fetchMyDeveloperNotifications(): Promise<MyNotification[]> {
+  const { data, error } = await getSupabase().rpc('get_my_developer_notifications');
+  if (error) throw error;
+  return (data ?? []) as MyNotification[];
+}
+
+export async function markDeveloperNotificationRead(notificationId: string): Promise<void> {
+  const { error } = await getSupabase().rpc('mark_developer_notification_read', { p_notification: notificationId });
+  if (error) throw error;
+}
+
+/** ملخص عدادات ورسائل الشريط العلوي. لا يعيد إلا عناصر الحساب الحالي ومساراتها المناسبة. */
+export async function fetchMyCommunicationSummary(): Promise<CommunicationSummary> {
+  const { data, error } = await getSupabase().rpc('get_my_communication_summary');
+  if (error) throw error;
+  const raw = (data ?? {}) as Partial<CommunicationSummary>;
+  return {
+    notifications: { unread: Number(raw.notifications?.unread ?? 0), items: Array.isArray(raw.notifications?.items) ? raw.notifications.items : [] },
+    messages: { unread: Number(raw.messages?.unread ?? 0), items: Array.isArray(raw.messages?.items) ? raw.messages.items : [] },
+  };
+}
+
+/** تعليم أي إشعار ظاهر للحساب الحالي؛ يتحقق RPC من الدور والسنتر والجمهور. */
+export async function markMyCommunicationNotificationRead(notificationId: string): Promise<void> {
+  const { error } = await getSupabase().rpc('mark_my_communication_notification_read', { p_notification: notificationId });
+  if (error) throw error;
+  notifyCommunicationChanged();
+}
+
+/** تعليم رسائل الدعم الواردة للحساب الحالي كمقروءة عند فتح المحادثة. */
+export async function markMySupportMessagesRead(centerId?: string | null): Promise<void> {
+  const { error } = await getSupabase().rpc('mark_my_support_messages_read', { p_center: centerId ?? null });
+  if (error) throw error;
+  notifyCommunicationChanged();
+}
 
 export async function fetchNotifications(centerId: string): Promise<AppNotification[]> {
   const { data, error } = await getSupabase().from('app_notifications').select('*')
@@ -1283,29 +1641,6 @@ export async function fetchMyNotifications(): Promise<MyNotification[]> {
   const { data, error } = await getSupabase().rpc('get_my_notifications');
   if (error) throw error;
   return (data ?? []) as MyNotification[];
-}
-
-/** إشعارات المطور الخاصة بأصحاب السنتر (قناة owners) */
-export async function fetchOwnerNotices(centerId: string): Promise<AppNotification[]> {
-  const { data, error } = await getSupabase().from('app_notifications').select('*')
-    .eq('center_id', centerId).eq('audience', 'owners')
-    .order('created_at', { ascending: false }).limit(100);
-  if (error) throw error;
-  return (data ?? []) as AppNotification[];
-}
-
-/** تعليم إشعار مطور كمقروء (يُخزن بمعرف حساب المسئول) */
-export async function markOwnerNoticeRead(centerId: string, notificationId: string): Promise<void> {
-  const { data: sess } = await getSupabase().auth.getSession();
-  const uid = sess.session?.user.id;
-  if (!uid) throw new Error('not_authenticated');
-  const { data: mine } = await getSupabase().from('app_notification_reads').select('id')
-    .eq('notification_id', notificationId).eq('student_id', uid).maybeSingle();
-  if (mine) return;
-  const { error } = await getSupabase().from('app_notification_reads').insert({
-    id: uuid(), center_id: centerId, notification_id: notificationId, student_id: uid,
-  });
-  if (error) throw error;
 }
 
 // ------------------------------------------------------------
@@ -1361,6 +1696,27 @@ export async function devSendSupportMessage(centerId: string, body: string): Pro
   if (error) throw error;
 }
 
+// ------------------------------------------------------------
+// الشكاوي العامة (المطور فقط) — نموذج الزوار في app/about.tsx
+// ------------------------------------------------------------
+
+export interface ComplaintRow {
+  id: string; ticket_no: string; phone: string; name: string | null;
+  subject: string; body: string; status: 'open' | 'in_progress' | 'closed';
+  device_id: string | null; created_at: string;
+}
+
+export async function devListComplaints(): Promise<ComplaintRow[]> {
+  const { data, error } = await getSupabase().rpc('dev_list_complaints');
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as ComplaintRow[];
+}
+
+export async function devUpdateComplaint(id: string, status: 'open' | 'in_progress' | 'closed'): Promise<void> {
+  const { error } = await getSupabase().rpc('dev_update_complaint', { p_id: id, p_status: status });
+  if (error) throw error;
+}
+
 export async function markNotificationRead(centerId: string, notificationId: string, studentId: string): Promise<void> {
   const { error } = await getSupabase().from('app_notification_reads').insert({
     id: uuid(), center_id: centerId, notification_id: notificationId, student_id: studentId,
@@ -1374,6 +1730,7 @@ export async function markNotificationRead(centerId: string, notificationId: str
 
 const DEFAULT_SETTINGS: CenterSettings = {
   whatsapp: '', contact_email: '', registration_open: true, archive_year: '',
+  print: DEFAULT_CENTER_PRINT_SETTINGS,
 };
 
 export async function fetchCenterSettings(centerId: string): Promise<CenterSettings> {
@@ -1386,7 +1743,14 @@ export async function fetchCenterSettings(centerId: string): Promise<CenterSetti
     contact_email: s.contact_email ?? '',
     registration_open: s.registration_open ?? true,
     archive_year: s.archive_year ?? '',
+    print: normalizeCenterPrintSettings(s.print),
   };
+}
+
+/** هوية الوثائق في كل شاشة طباعة؛ تُقرأ وقت الطباعة حتى يطبق آخر تعديل فوراً. */
+export async function fetchCenterPrintBranding(centerId: string): Promise<CenterPrintBranding> {
+  const [settings, center] = await Promise.all([fetchCenterSettings(centerId), fetchMyCenter(centerId)]);
+  return brandForCenter(center?.name, settings.print);
 }
 
 export async function saveCenterSettings(centerId: string, s: CenterSettings): Promise<void> {
@@ -1397,6 +1761,7 @@ export async function saveCenterSettings(centerId: string, s: CenterSettings): P
       contact_email: s.contact_email.trim(),
       registration_open: !!s.registration_open,
       archive_year: s.archive_year.trim(),
+      print: normalizeCenterPrintSettings(s.print),
     },
     updated_at: nowIso(),
   });
@@ -1496,4 +1861,46 @@ export async function devFetchProfilesCount(): Promise<{ total: number; byRole: 
     byRole[p.role] = (byRole[p.role] ?? 0) + 1;
   }
   return { total: data?.length ?? 0, byRole };
+}
+
+/** إحصاءات عداد الزوار (كل جهاز فريد يُعدّ مرة واحدة) */
+export interface VisitorStats { total: number; today: number; week: number; }
+export async function devFetchVisitorStats(): Promise<VisitorStats> {
+  const { data, error } = await getSupabase().rpc('get_site_visitor_stats');
+  if (error) throw error;
+  return (data ?? { total: 0, today: 0, week: 0 }) as VisitorStats;
+}
+
+/** أحدث الأجهزة المسجلة (المطور فقط) — لعرضها وحجب/إلغاء حجب أي جهاز */
+export interface VisitorRow {
+  id: string; device_id: string; first_seen: string; last_seen: string; blocked: boolean;
+}
+export async function devListVisitors(): Promise<VisitorRow[]> {
+  const { data, error } = await getSupabase().rpc('dev_list_visitors');
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as VisitorRow[];
+}
+
+/** حجب/إلغاء حجب جهاز (المطور فقط) */
+export async function devSetDeviceBlocked(deviceId: string, blocked: boolean): Promise<void> {
+  const { error } = await getSupabase().rpc('dev_set_device_blocked', { p_device_id: deviceId, p_blocked: blocked });
+  if (error) throw error;
+}
+
+/** آخر ظهور لصاحب كل سنتر — من سجل حضور الحساب لا من IP (المطور فقط) */
+export interface CenterOwnerPresence {
+  account_id: string; center_id: string; center_name: string; center_code: string;
+  owner_name: string; owner_email: string | null; last_seen: string | null; platform: string | null;
+}
+export async function devListCenterOwnerPresence(): Promise<CenterOwnerPresence[]> {
+  const { data, error } = await getSupabase().rpc('dev_list_center_owner_presence');
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as CenterOwnerPresence[];
+}
+
+/** تحديث حضور حساب المستخدم الحالي (يظهر للمطور متى آخر مرة فتح هذا الحساب التطبيق) */
+export async function touchMyAccountPresence(): Promise<void> {
+  const device = await getDeviceId();
+  const { error } = await getSupabase().rpc('touch_my_account_presence', { p_device_id: device, p_platform: 'android' });
+  if (error) throw error;
 }

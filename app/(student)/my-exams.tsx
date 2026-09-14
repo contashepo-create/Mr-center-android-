@@ -1,20 +1,178 @@
 // ============================================================
 // اختبارات الطالب: المنشورة + التأدية بمؤقت (٨ أنواع أسئلة)
-// + نتائجي — التصحيح التلقائي خادمي واليدوي عند المعلم
+// + محاولات متعددة + طرق عرض النتيجة (بعد كل سؤال/عند التسليم/أبداً)
+// + مراجعة سؤال بسؤال بعد التصحيح — التصحيح التلقائي خادمي واليدوي عند المعلم
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { AppButton, AppInput, Card, EmptyState, LoadingView, SectionTitle } from '../../src/components/controls';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppButton, AppInput, Card, LoadingView, SectionTitle } from '../../src/components/controls';
 import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { FormMessage } from '../../src/components/pickers';
-import { fetchMyExamAttempts, fetchPublishedExams, submitExam } from '../../src/lib/api';
+import { fetchMyExamAttempts, fetchPublishedExams, submitExam, type ExamResult } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
-import type { ExamAnswer, ExamAttempt, ExamQuestionType, PublishedExam } from '../../src/lib/types';
+import type { ExamAnswer, ExamAttempt, ExamQuestion, ExamQuestionType, PublishedExam } from '../../src/lib/types';
 import { arabicError, EXAM_TYPE_LABEL, formatDate, normalizeAnswerText, seededShuffle } from '../../src/lib/utils';
 import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
+
+/** نص إجابة الطالب كما كُتبت */
+function answerLabel(q: ExamQuestion, a: ExamAnswer | undefined): string {
+  if (a === null || a === undefined || a === '') return 'لم تُجب';
+  const t = (q.type ?? 'mcq') as ExamQuestionType;
+  if (t === 'mcq') return typeof a === 'number' ? (q.choices[a] ?? 'لم تُجب') : 'لم تُجب';
+  if (t === 'tf') return a === 0 ? 'صح' : a === 1 ? 'خطأ' : 'لم تُجب';
+  if (t === 'multi') {
+    return Array.isArray(a) && a.length > 0 ? (a as number[]).map((i) => q.choices[i]).filter(Boolean).join('، ') : 'لم تُجب';
+  }
+  if (t === 'match') {
+    if (!Array.isArray(a) || a.length === 0) return 'لم تُجب';
+    const pairs = q.pairs ?? [];
+    const parts = pairs.map((p, i) => `${p.l} ← ${pairs[(a as number[])[i]]?.r ?? '—'}`);
+    return parts.join(' · ');
+  }
+  return typeof a === 'string' && a.trim() !== '' ? a.trim() : 'لم تُجب';
+}
+
+/** الإجابة النموذجية نصاً */
+function correctLabel(q: ExamQuestion, model: ExamAnswer | undefined): string {
+  if (model === null || model === undefined) return '—';
+  const t = (q.type ?? 'mcq') as ExamQuestionType;
+  if (t === 'mcq') return typeof model === 'number' ? (q.choices[model] ?? '—') : '—';
+  if (t === 'tf') return model === 0 ? 'صح' : model === 1 ? 'خطأ' : '—';
+  if (t === 'multi') {
+    return Array.isArray(model) && model.length > 0 ? (model as number[]).map((i) => q.choices[i]).filter(Boolean).join('، ') : '—';
+  }
+  if (t === 'match') {
+    if (!Array.isArray(model)) return '—';
+    const pairs = q.pairs ?? [];
+    return pairs.map((p, i) => `${p.l} ← ${pairs[(model as number[])[i]]?.r ?? '—'}`).join(' · ');
+  }
+  if (t === 'complete' || t === 'correct') return typeof model === 'string' && model.trim() !== '' ? model.trim() : '—';
+  return '—';
+}
+
+function isManualType(t: ExamQuestionType): boolean {
+  return t === 'essay' || t === 'short' || t === 'correct';
+}
+
+/** يعرض نص السؤال مع تسطير الكلمة/الكلمات المختارة في سؤال «صوّب ما تحته خط». */
+function UnderlinedQuestionText({ question }: { question: ExamQuestion }) {
+  if (question.type !== 'correct' || !question.underlined?.count) return <Text>{question.q}</Text>;
+  const start = Math.max(0, question.underlined.start - 1);
+  const end = start + Math.max(0, question.underlined.count);
+  let wordIndex = 0;
+  return (
+    <Text>
+      {question.q.split(/(\s+)/).map((piece, index) => {
+        if (!piece.trim()) return <Text key={index}>{piece}</Text>;
+        const underlined = wordIndex >= start && wordIndex < end;
+        wordIndex += 1;
+        return underlined ? <Text key={index} style={{ textDecorationLine: 'underline', fontWeight: '800' }}>{piece}</Text> : <Text key={index}>{piece}</Text>;
+      })}
+    </Text>
+  );
+}
+
+/** صورة السؤال — تظهر فوق/تحت النص في الاختبار الإلكتروني، بلا موضع «بجانب» على الهاتف. */
+function QuestionImage({ q }: { q: ExamQuestion }) {
+  if (!q.image) return null;
+  const width = Math.min(320, Math.max(80, Number(q.imageSize) || 200));
+  return (
+    <Image
+      source={{ uri: q.image }}
+      style={{ width, height: width * 0.66, borderRadius: 8, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.sm, backgroundColor: '#fff' }}
+      resizeMode="contain"
+    />
+  );
+}
+
+/** بطاقة مراجعة سؤال بسؤال بعد التصحيح، تُستخدم أيضاً بعد كل سؤال إن اختارت الإدارة ذلك */
+function ExamReview({
+  result, questions, answers,
+}: {
+  result: ExamResult;
+  questions: ExamQuestion[];
+  answers: ExamAnswer[];
+}) {
+  const pct = result.max_score > 0 ? Math.round((result.score / result.max_score) * 100) : null;
+  const pending = result.status === 'pending_review';
+  const scoreColor = pct !== null && pct >= 85 ? colors.success : pct !== null && pct >= 50 ? colors.warning : colors.danger;
+  const perQuestion = result.per_question ?? [];
+
+  return (
+    <View>
+      <Card style={styles.scoreCard}>
+        <View style={[styles.pendingBadge, { backgroundColor: (pending ? colors.warning : colors.success) + '22' }]}>
+          <Text style={[styles.pendingBadgeText, { color: pending ? colors.warning : colors.success }]}>
+            {pending ? 'بانتظار مراجعة المعلم' : 'تم التصحيح'}
+          </Text>
+        </View>
+        <Text style={[styles.bigScore, { color: scoreColor }]}>
+          {result.score} <Text style={styles.bigScoreMax}>/ {result.max_score || '—'}</Text>
+        </Text>
+        {pct !== null ? <Text style={[styles.pctText, { color: scoreColor }]}>{pct}%</Text> : null}
+        <Text style={styles.scoreSub}>
+          أجبت صحيحاً على {result.correct} من {result.total} سؤال
+          {result.attempts_used && result.attempts_allowed ? ` · المحاولة ${result.attempts_used} من ${result.attempts_allowed}` : ''}
+        </Text>
+      </Card>
+
+      {perQuestion.length > 0 ? (
+        <>
+          <SectionTitle title="مراجعة الإجابات" />
+          {perQuestion.map((r) => {
+            const q = questions[r.q];
+            if (!q) return null;
+            const a = answers[r.q];
+            const manual = r.correct === null;
+            const myAnswer = answerLabel(q, a);
+            const answered = myAnswer !== 'لم تُجب';
+            const model = r.model !== undefined ? r.model : (q.type === 'complete' || q.type === 'correct' ? q.answer ?? null : undefined);
+            const key = correctLabel(q, model);
+            const verdict: 'correct' | 'wrong' | 'pending' = manual ? 'pending' : r.correct ? 'correct' : 'wrong';
+            return (
+              <Card key={r.q} style={{ marginBottom: spacing.md }}>
+                <View style={styles.reviewHead}>
+                  <Text style={styles.reviewQ} numberOfLines={2}>{r.q + 1}. {q.q}</Text>
+                  <View style={styles.reviewMarksBadge}>
+                    <Text style={styles.reviewMarksText}>{r.earned}/{r.marks} درجة</Text>
+                  </View>
+                </View>
+                <View style={[
+                  styles.answerRow,
+                  verdict === 'correct' && styles.answerRowCorrect,
+                  verdict === 'wrong' && styles.answerRowWrong,
+                ]}
+                >
+                  <Text style={styles.answerText}><Text style={styles.answerLabel}>إجابتك: </Text>{myAnswer}</Text>
+                  {verdict === 'correct' ? <Ionicons name="checkmark-circle" size={20} color={colors.success} /> : null}
+                  {verdict === 'wrong' ? <Ionicons name="close-circle" size={20} color={colors.danger} /> : null}
+                  {verdict === 'pending' ? <Ionicons name="time" size={20} color={colors.warning} /> : null}
+                </View>
+                {verdict === 'wrong' ? (
+                  <Text style={styles.verdictNote}>{answered ? '✗ إجابة خاطئة' : 'بدون إجابة'}</Text>
+                ) : null}
+                {verdict === 'pending' ? <Text style={[styles.verdictNote, { color: colors.warning }]}>بانتظار تصحيح المعلم</Text> : null}
+                {verdict === 'wrong' && key !== '—' ? (
+                  <View style={styles.modelBox}>
+                    <Text style={styles.modelText}><Text style={styles.answerLabel}>الإجابة الصحيحة: </Text>{key}</Text>
+                  </View>
+                ) : null}
+                {verdict === 'pending' && isManualType(q.type) && key !== '—' ? (
+                  <View style={[styles.modelBox, { backgroundColor: colors.info + '14', borderColor: colors.info + '44' }]}>
+                    <Text style={styles.modelText}><Text style={styles.answerLabel}>الإجابة النموذجية: </Text>{key}</Text>
+                  </View>
+                ) : null}
+              </Card>
+            );
+          })}
+        </>
+      ) : null}
+    </View>
+  );
+}
 
 export default function StudentExamsScreen() {
   const { profile } = useSession();
@@ -26,6 +184,7 @@ export default function StudentExamsScreen() {
   const [answers, setAnswers] = useState<ExamAnswer[]>([]);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<ExamResult | null>(null);
   const submittedRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -43,8 +202,11 @@ export default function StudentExamsScreen() {
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
+  const usedFor = (examId: string) => attempts.filter((a) => a.exam_id === examId).length;
+
   const startExam = (e: PublishedExam) => {
     submittedRef.current = false;
+    setResult(null);
     // تهيئة الإجابات حسب النوع: وصل = مصفوفة -1 لكل بند يسار، والباقي null
     setAnswers(e.questions.map((q) => {
       const t = (q.type ?? 'mcq') as ExamQuestionType;
@@ -86,14 +248,18 @@ export default function StudentExamsScreen() {
         return a;
       });
       const res = await submitExam(taking.id, payload);
-      setTaking(null);
+      const mode = taking.show_result ?? 'end';
       await load();
-      Alert.alert(
-        'تم تسليم الامتحان',
-        res.status === 'pending_review'
-          ? `استلمنا إجابتك — فيها أسئلة كتابية قيد مراجعة المعلم وستظهر درجتك بعد الاعتماد${auto ? '\n(انتهى الوقت فسُلّم تلقائياً)' : ''}`
-          : `درجتك: ${res.score} من ${res.max_score}\nإجابات صحيحة: ${res.correct} من ${res.total}${auto ? '\n(انتهى الوقت فسُلّم تلقائياً)' : ''}`,
-      );
+      if (mode === 'never') {
+        setResult(null);
+        setTaking(null);
+        Alert.alert(
+          'تم التسليم بنجاح',
+          `لن تظهر النتيجة الآن — ستُعرض لك بعد تحرير جميع النتائج من الإدارة${auto ? '\n(انتهى الوقت فسُلّم تلقائياً)' : ''}.`,
+        );
+      } else {
+        setResult(res);
+      }
     } catch (e) {
       submittedRef.current = false;
       Alert.alert('تعذر التسليم', arabicError(e));
@@ -103,17 +269,29 @@ export default function StudentExamsScreen() {
   };
 
   useEffect(() => {
-    if (!taking) return;
+    if (!taking || result) return;
     if (secondsLeft <= 0) { void finish(true); return; }
     const t = setTimeout(() => setSecondsLeft((s) => s - 1), 1000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taking, secondsLeft]);
+  }, [taking, secondsLeft, result]);
 
   const mm = Math.floor(secondsLeft / 60);
   const ss = String(secondsLeft % 60).padStart(2, '0');
 
   if (taking) {
+    if (result) {
+      return (
+        <GradientScreen>
+          <BackHeader title={taking.title} subtitle="نتيجتك" />
+          <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+            <ExamReview result={result} questions={taking.questions} answers={answers} />
+            <AppButton title="العودة إلى الاختبارات" icon="arrow-back" variant="outline" onPress={() => { setTaking(null); setResult(null); }} />
+            <View style={{ height: spacing.xl }} />
+          </ScrollView>
+        </GradientScreen>
+      );
+    }
     return (
       <GradientScreen>
         <BackHeader title={taking.title} subtitle={`${taking.subject} — ${taking.questions.length} أسئلة`} />
@@ -138,8 +316,9 @@ export default function StudentExamsScreen() {
             }
             return (
               <Card key={qi} style={{ marginBottom: spacing.md }}>
+                {q.image && q.imagePosition !== 'below' ? <QuestionImage q={q} /> : null}
                 <Text style={styles.qText}>
-                  {qi + 1}) {q.q} [{EXAM_TYPE_LABEL[qtype] ?? qtype} — {marks} درجة]
+                  {qi + 1}) <UnderlinedQuestionText question={q} /> [{EXAM_TYPE_LABEL[qtype] ?? qtype} — {marks} درجة]
                 </Text>
 
                 {/* اختياري / صح-خطأ: اختيار واحد */}
@@ -234,6 +413,7 @@ export default function StudentExamsScreen() {
                     onChangeText={(v) => setAnswers((p) => p.map((a, ai) => (ai === qi ? v : a)))}
                   />
                 ) : null}
+                {q.image && q.imagePosition === 'below' ? <QuestionImage q={q} /> : null}
               </Card>
             );
           })}
@@ -271,33 +451,59 @@ export default function StudentExamsScreen() {
     );
   }
 
+  const availableExams = exams.filter((e) => usedFor(e.id) < (e.attempts_allowed ?? 1));
+  const exhaustedExams = exams.filter((e) => usedFor(e.id) >= (e.attempts_allowed ?? 1));
+
   return (
     <GradientScreen>
-      <BackHeader title="الاختبارات" subtitle="أدِّ المنشور وحاول مرة واحدة" />
+      <BackHeader title="الاختبارات" subtitle="أدِّ المنشور حسب عدد المحاولات المسموحة" />
       {loading ? (
         <LoadingView message="جاري التحميل..." />
       ) : (
         <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
-          <SectionTitle title={`امتحانات متاحة (${exams.filter((e) => !e.attempted).length})`} />
-          {exams.filter((e) => !e.attempted).length === 0 ? (
+          <SectionTitle title={`امتحانات متاحة (${availableExams.length})`} />
+          {availableExams.length === 0 ? (
             <Card><Text style={styles.dimText}>لا توجد امتحانات جديدة — ستظهر هنا فور نشرها</Text></Card>
-          ) : exams.filter((e) => !e.attempted).map((e) => (
-            <Card key={e.id} style={styles.examCard}>
-              <View style={styles.examHead}>
-                <View style={styles.examIcon}>
-                  <Ionicons name="document-text" size={20} color={colors.primary} />
+          ) : availableExams.map((e) => {
+            const used = usedFor(e.id);
+            const allowed = e.attempts_allowed ?? 1;
+            return (
+              <Card key={e.id} style={styles.examCard}>
+                <View style={styles.examHead}>
+                  <View style={styles.examIcon}>
+                    <Ionicons name="document-text" size={20} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.examTitle}>{e.title}</Text>
+                    <Text style={styles.examMeta}>
+                      {e.subject} · {e.questions.length} أسئلة · {e.duration_minutes ?? 30} دقيقة · من {e.total_score} · المحاولات {used}/{allowed}
+                    </Text>
+                  </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.examTitle}>{e.title}</Text>
-                  <Text style={styles.examMeta}>
-                    {e.subject} · {e.questions.length} أسئلة · {e.duration_minutes ?? 30} دقيقة · من {e.total_score}
-                  </Text>
-                </View>
-              </View>
-              <View style={{ height: spacing.md }} />
-              <AppButton title="بدء الامتحان" icon="play" small onPress={() => startExam(e)} />
-            </Card>
-          ))}
+                <View style={{ height: spacing.md }} />
+                <AppButton title={used > 0 ? 'إعادة المحاولة' : 'بدء الامتحان'} icon="play" small onPress={() => startExam(e)} />
+              </Card>
+            );
+          })}
+
+          {exhaustedExams.length > 0 ? (
+            <>
+              <SectionTitle title={`اكتملت محاولاتها (${exhaustedExams.length})`} />
+              {exhaustedExams.map((e) => (
+                <Card key={e.id} style={{ ...styles.examCard, opacity: 0.65 }}>
+                  <View style={styles.examHead}>
+                    <View style={styles.examIcon}>
+                      <Ionicons name="checkmark-done" size={20} color={colors.textMuted} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.examTitle}>{e.title}</Text>
+                      <Text style={styles.examMeta}>استنفدت المحاولات ({e.attempts_allowed ?? 1})</Text>
+                    </View>
+                  </View>
+                </Card>
+              ))}
+            </>
+          ) : null}
 
           <SectionTitle title={`نتائجي (${attempts.length})`} />
           {attempts.length === 0 ? (
@@ -306,16 +512,17 @@ export default function StudentExamsScreen() {
             const exam = exams.find((e) => e.id === a.exam_id);
             const pending = a.status === 'pending_review';
             const pct = Number(a.max_score) > 0 ? Math.round((Number(a.score) / Number(a.max_score)) * 100) : 0;
+            const hidden = exam?.show_result === 'never';
             return (
               <View key={a.id} style={styles.resRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.resTitle} numberOfLines={1}>{exam?.title ?? 'امتحان'}</Text>
                   <Text style={styles.resMeta}>
-                    {formatDate(a.created_at)}{pending ? ' · قيد مراجعة المعلم' : ''}
+                    {formatDate(a.created_at)}{pending ? ' · قيد مراجعة المعلم' : ''}{hidden ? ' · بانتظار تحرير النتائج' : ''}
                   </Text>
                 </View>
-                <Text style={[styles.resScore, { color: pending ? colors.warning : pct >= 50 ? colors.success : colors.danger }]}>
-                  {pending ? '...' : `${a.score}/${a.max_score}`}
+                <Text style={[styles.resScore, { color: pending || hidden ? colors.warning : pct >= 50 ? colors.success : colors.danger }]}>
+                  {pending || hidden ? '...' : `${a.score}/${a.max_score}`}
                 </Text>
               </View>
             );
@@ -373,4 +580,30 @@ const styles = themedStyles(() => StyleSheet.create({
   resTitle: { color: colors.text, fontSize: font.md, fontWeight: '700', textAlign: 'right' },
   resMeta: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
   resScore: { fontSize: font.lg, fontWeight: '900' },
+  scoreCard: { alignItems: 'center', paddingVertical: spacing.xl, marginBottom: spacing.md },
+  pendingBadge: { borderRadius: radius.full, paddingHorizontal: spacing.md, paddingVertical: 6, marginBottom: spacing.md },
+  pendingBadgeText: { fontSize: font.sm, fontWeight: '800' },
+  bigScore: { fontSize: 46, fontWeight: '900', writingDirection: 'ltr' },
+  bigScoreMax: { fontSize: 20, color: colors.textMuted, fontWeight: '700' },
+  pctText: { fontSize: font.lg, fontWeight: '900', marginTop: spacing.xs },
+  scoreSub: { color: colors.textSecondary, fontSize: font.sm, textAlign: 'center', marginTop: spacing.sm },
+  reviewHead: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginBottom: spacing.sm },
+  reviewQ: { flex: 1, color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
+  reviewMarksBadge: { backgroundColor: colors.info + '22', borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 4 },
+  reviewMarksText: { color: colors.info, fontSize: font.xs, fontWeight: '800' },
+  answerRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.md, padding: spacing.md,
+  },
+  answerRowCorrect: { borderColor: colors.success + '66', backgroundColor: colors.successBg },
+  answerRowWrong: { borderColor: colors.danger + '66', backgroundColor: colors.dangerBg },
+  answerText: { flex: 1, color: colors.text, fontSize: font.sm, textAlign: 'right' },
+  answerLabel: { fontWeight: '800' },
+  verdictNote: { color: colors.danger, fontSize: font.xs, textAlign: 'right', marginTop: spacing.xs, fontWeight: '700' },
+  modelBox: {
+    backgroundColor: colors.successBg, borderWidth: 1, borderColor: colors.success + '55',
+    borderRadius: radius.md, padding: spacing.sm, marginTop: spacing.sm,
+  },
+  modelText: { color: colors.text, fontSize: font.sm, textAlign: 'right' },
 }));

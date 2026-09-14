@@ -171,6 +171,7 @@ export default function StudentHome() {
         <ListItem title="مكتبة السنتر" subtitle="شرف وملفات وروابط مهمة" icon="library" iconColor={colors.warning} onPress={() => router.push('/my-library')} />
         <ListItem title="استفساراتي" subtitle="راسل إدارة سنترك" icon="chatbubbles" iconColor={colors.info} onPress={() => router.push('/my-inquiries')} />
         <ListItem title="الاستبيانات" subtitle="شارك رأيك" icon="list" iconColor={colors.success} onPress={() => router.push('/my-surveys')} />
+        <ListItem title="تقريري الشامل" subtitle="بياناتك وحضورك ودرجاتك ومستحقاتك" icon="reader" iconColor={colors.cyan} onPress={() => router.push('/my-report')} />
 
         {/* أوائل السنتر */}
         {honorees.length > 0 ? (

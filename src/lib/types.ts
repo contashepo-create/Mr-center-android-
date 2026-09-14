@@ -65,6 +65,7 @@ export interface Grade {
   center_id: string;
   name: string;
   academic_year: string;
+  sort_order: number;
   created_at: string;
 }
 
@@ -85,6 +86,8 @@ export interface Group {
   weekly_price: number;
   session_price: number;
   students_count: number;
+  due_mode?: 'manual' | 'attendance';
+  attendance_due_amount?: number;
 }
 
 export interface Student {
@@ -111,6 +114,8 @@ export interface Due {
   due_year: number;
   amount: number;
   status: 'pending' | 'paid' | 'partial';
+  due_source?: 'manual' | 'attendance';
+  session_id?: string | null;
   created_at: string;
 }
 
@@ -124,7 +129,43 @@ export interface Payment {
   month: number;
   payment_year: number;
   notes: string | null;
+  payment_kind?: 'due_payment' | 'credit';
   created_at: string;
+}
+
+export interface StudentAccountDue {
+  id: string;
+  group_id: string | null;
+  month: number;
+  due_year: number;
+  amount: number;
+  cash_paid: number;
+  credit_applied: number;
+  settled_amount: number;
+  remaining: number;
+  status: 'pending' | 'paid' | 'partial';
+  due_source: 'manual' | 'attendance';
+  session_id: string | null;
+  created_at: string;
+}
+
+export interface StudentAccountCredit {
+  id: string;
+  amount: number;
+  remaining: number;
+  applied_to_dues: number;
+  settled_amount: number;
+  payment_date: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface StudentAccount {
+  student: Pick<Student, 'id' | 'name' | 'phone' | 'guardian_phone'>;
+  summary: { credit_balance: number; amount_due: number; net_balance: number };
+  dues: StudentAccountDue[];
+  credits: StudentAccountCredit[];
+  settlements: { amount: number; notes: string | null; created_at: string; kind: 'debt_settlement' }[];
 }
 
 export interface SessionRecord {
@@ -204,7 +245,21 @@ export interface FiscalYear {
   closed_at: string | null;
 }
 
-export interface StaffInvite {
+/** خصم معلّق على موظف — التزام حتى يُسوّى (كلياً أو جزئياً) عند صرف راتبه */
+export interface StaffDeduction {
+  id: string;
+  center_id: string;
+  staff_id: string;
+  amount: number;
+  applied_amount: number;
+  reason: string;
+  notes: string;
+  occurred_on: string;
+  status: 'open' | 'partial' | 'settled';
+  created_at: string;
+}
+
+export interface StaffInviteRow {
   id: string;
   center_id: string;
   code: string;
@@ -251,10 +306,48 @@ export interface ExamQuestion {
   answer?: string;
   /** أزواج التوصيل (وصل) */
   pairs?: ExamPair[];
+  /** معرف رأس السؤال/القسم في محرر الاختبارات؛ يحافظ على ترتيب الأسئلة الفرعية عند إعادة الفتح. */
+  sectionId?: string;
+  /** نطاق الكلمات التي تظهر تحت خط في سؤال «صوّب ما تحته خط» (ترقيم يبدأ من 1). */
+  underlined?: { start: number; count: number };
+  /** صورة السؤال (رابط خارجي أو رابط تخزين عام) */
+  image?: string | null;
+  /** مكان الصورة: بجانب السؤال (ورقي) أو فوق/تحت (إلكتروني) */
+  imagePosition?: 'beside' | 'above' | 'below';
+  /** عرض الصورة بالبكسل (80..600) */
+  imageSize?: number;
 }
 
 /** قيمة إجابة سؤال: فهرس / مصفوفة فهارس / نص / null لليدوي بلا نموذج */
 export type ExamAnswer = number | number[] | string | null;
+
+export type ExamResultMode = 'after_each' | 'end' | 'never';
+export type ExamAvailabilityMode = 'always' | 'scheduled';
+export type ExamDeliveryMode = 'paper' | 'online';
+export type OnlineExamMode = 'objective' | 'essay' | 'mixed';
+/** قوالب ورقة الاختبار. التسعة الأولى تطابق Center Publish؛ formal يبقي القالب السابق متوافقاً. */
+export type PaperTemplate = 'classic' | 'lab' | 'life' | 'cosmos' | 'explorer' | 'royal' | 'parchment' | 'wedding' | 'modern' | 'formal';
+
+/** كثافة الزخارف حول الورقة */
+export type OrnamentDensity = 'low' | 'medium' | 'high';
+
+/** ختم زخرفة موضوع يدوياً على الورقة (كنسبة مئوية من أبعادها) */
+export interface OrnamentStamp {
+  id: string;
+  kind: string;
+  x: number; // 0..100
+  y: number; // 0..100
+  size: number; // px
+}
+
+/** إعدادات زخارف ورقة الاختبار */
+export interface ExamOrnaments {
+  placement: 'auto' | 'manual';
+  density: OrnamentDensity;
+  opacity: number; // 0..1
+  kinds: string[]; // الأنواع المختارة (تُعبأ تلقائياً حسب المادة)
+  stamps: OrnamentStamp[]; // أختام يدوية (وضع manual)
+}
 
 export interface AppExam {
   id: string;
@@ -267,6 +360,24 @@ export interface AppExam {
   answers: ExamAnswer[];
   total_score: number;
   is_published: boolean;
+  /** عدد المحاولات المسموحة لكل طالب (افتراضي 1). */
+  attempts_allowed?: number;
+  /** متى تظهر النتيجة للطالب: بعد كل سؤال، عند التسليم، أو أبداً (تنتظر تحرير الإدارة). */
+  show_result?: ExamResultMode;
+  /** مسار الاختبار وتحكم عرضه — تتوافق الاختبارات القديمة مع online/mixed تلقائياً. */
+  delivery_mode?: ExamDeliveryMode;
+  online_mode?: OnlineExamMode;
+  /** تقييد الاختبار على مجموعات محددة داخل الصف؛ فارغة = كل مجموعات الصف. */
+  target_group_ids?: string[];
+  availability_mode?: ExamAvailabilityMode;
+  available_from?: string | null;
+  available_until?: string | null;
+  /** قالب ورقة الاختبار (اختبارات ورقية فقط). */
+  paper_template?: PaperTemplate;
+  /** عبارة يكتبها المنشئ في نهاية ورقة الاختبار (اختيارية). */
+  paper_footer?: string;
+  /** زخارف الورقة (اختياري — قد تكون غائبة في الاختبارات القديمة) */
+  ornaments?: ExamOrnaments | null;
   created_at: string;
 }
 
@@ -279,6 +390,9 @@ export interface PublishedExam {
   total_score: number;
   questions: ExamQuestion[];
   attempted: boolean;
+  attempts_allowed: number;
+  attempts_used: number;
+  show_result: ExamResultMode;
   created_at: string;
 }
 
@@ -316,16 +430,47 @@ export interface AppInquiry {
   body: string;
   status: InquiryStatus;
   reply: string | null;
+  /** تفاصيل طلب الانتقال؛ موجودة فقط عندما kind = transfer. */
+  from_group_id?: string | null;
+  to_group_id?: string | null;
+  resolved_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export type SurveyQuestionType = 'single' | 'multi' | 'rating' | 'yesno' | 'text';
+export type SurveyAudience = 'all' | 'grade' | 'group';
+
+export interface SurveyQuestion {
+  id: string;
+  type: SurveyQuestionType;
+  title: string;
+  required?: boolean;
+  options?: string[];
+  maxRating?: number;
+  placeholder?: string;
+}
+
+export interface SurveyAnswer {
+  choice?: string[];
+  text?: string;
+  rating?: number;
 }
 
 export interface AppSurvey {
   id: string;
   center_id: string;
   title: string;
-  questions: string[];
+  description?: string;
+  audience: SurveyAudience;
+  grade_id: string | null;
+  group_ids: string[];
+  questions: SurveyQuestion[];
   is_active: boolean;
+  anonymous: boolean;
+  lock_after_submit: boolean;
+  deadline: string | null;
+  version: number;
   created_at: string;
 }
 
@@ -334,11 +479,36 @@ export interface AppSurveyResponse {
   center_id: string;
   survey_id: string;
   student_id: string;
-  answers: string[];
+  answers: Record<string, SurveyAnswer>;
   created_at: string;
 }
 
-export type NotificationAudience = 'all' | 'grade' | 'group' | 'student' | 'owners';
+export type NotificationAudience = 'all' | 'grade' | 'group' | 'student' | 'owners' | 'staff';
+
+/** طريقة وصول بث المطور: إشعار في الجرس، رسالة في صندوق الرسائل، أو نافذة طارئة مع سجل. */
+export type DeveloperBroadcastPresentation = 'notification' | 'message' | 'urgent';
+
+/** قنوات بث المطور الشاملة، متطابقة مع الويب وموثقة خادمياً عبر RPC. */
+export type DeveloperBroadcastChannel =
+  | 'center'
+  | 'all_owners'
+  | 'all_owners_staff'
+  | 'all_owners_students'
+  | 'all_students'
+  | 'staff'
+  | 'all_project';
+
+/** مستلمو السنتر المحدد؛ كل اختيار يولّد صفاً واحداً فقط لكل دور، بلا رسائل مكررة. */
+export type CenterBroadcastDelivery = 'owners' | 'owners_staff' | 'owners_students' | 'owners_students_staff' | 'students' | 'staff' | 'everyone';
+
+export interface DeveloperBroadcastResult {
+  channel: DeveloperBroadcastChannel;
+  presentation?: DeveloperBroadcastPresentation;
+  broadcast_id?: string;
+  centers: number;
+  notification_rows: number;
+  recipient_accounts: number;
+}
 
 export interface AppNotification {
   id: string;
@@ -355,7 +525,58 @@ export interface MyNotification {
   title: string;
   body: string;
   created_at: string;
+  /** notification = الجرس، message = صندوق الرسائل، urgent = نافذة طارئة وسجل. */
+  presentation?: DeveloperBroadcastPresentation;
   is_read: boolean;
+}
+
+export interface CommunicationItem {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  presentation?: DeveloperBroadcastPresentation;
+  route: string;
+  kind: 'notification' | 'developer_message' | 'support_message';
+}
+
+export interface CommunicationBucket {
+  unread: number;
+  items: CommunicationItem[];
+}
+
+export interface CommunicationSummary {
+  notifications: CommunicationBucket;
+  messages: CommunicationBucket;
+}
+
+export type PrintLogoPosition = 'top_right' | 'top_left' | 'top_center' | 'bottom_right' | 'bottom_left';
+export type PrintWatermarkDirection = 'diagonal' | 'vertical' | 'horizontal';
+export type PrintWatermarkPattern = 'single' | 'grid' | 'staggered';
+export type PrintWatermarkLayer = 'front' | 'behind';
+
+/** هوية طباعة السنتر: شعار وعلامة مائية وتذييل موحّد لكل المستندات المطبوعة. */
+export interface CenterPrintSettings {
+  footer_address: string;
+  footer_enabled: boolean;
+  footer_show_center_name: boolean;
+  footer_show_address: boolean;
+  footer_font_size: number;
+  header_show_center_name: boolean;
+  logo_url: string;
+  logo_position: PrintLogoPosition;
+  logo_size: number;
+  watermark_enabled: boolean;
+  watermark_text: string;
+  watermark_image: string;
+  watermark_opacity: number;
+  watermark_direction: PrintWatermarkDirection;
+  watermark_pattern: PrintWatermarkPattern;
+  watermark_repeat_count: number;
+  watermark_font_size: number;
+  watermark_image_size: number;
+  watermark_color: string;
+  watermark_layer: PrintWatermarkLayer;
 }
 
 export interface CenterSettings {
@@ -363,6 +584,7 @@ export interface CenterSettings {
   contact_email: string;
   registration_open: boolean;
   archive_year: string;
+  print: CenterPrintSettings;
 }
 
 export interface PublicConfig {

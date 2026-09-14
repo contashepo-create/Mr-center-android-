@@ -9,7 +9,7 @@ import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react
 import { AppButton, AppInput, EmptyState, ListItem, LoadingView } from '../../src/components/controls';
 import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { FormMessage } from '../../src/components/pickers';
-import { addGrade, deleteGrade, fetchGrades, updateGrade } from '../../src/lib/api';
+import { addGrade, deleteGrade, fetchGrades, moveGrade, updateGrade } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
 import { isOwner } from '../../src/lib/staff';
 import type { Grade } from '../../src/lib/types';
@@ -76,6 +76,11 @@ export default function GradesListScreen() {
     }
   };
 
+  const shift = async (id: string, dir: -1 | 1) => {
+    try { await moveGrade(id, dir); await load(); }
+    catch (e) { Alert.alert('تعذر النقل', arabicError(e)); }
+  };
+
   const confirmDelete = (g: Grade) => {
     Alert.alert('حذف الصف', `حذف «${g.name}»؟ لن يتأثر الطلاب والمجموعات المرتبطة.`, [
       { text: 'إلغاء', style: 'cancel' },
@@ -124,14 +129,31 @@ export default function GradesListScreen() {
           keyExtractor={(g) => g.id}
           contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: 100 }}
           showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => (
+          renderItem={({ item, index }) => (
             <ListItem
               title={item.name}
+              subtitle={`الترتيب ${index + 1}`}
               icon="school"
               iconColor={colors.info}
               right={
                 canManage ? (
                   <View style={{ flexDirection: 'row', gap: spacing.xs }}>
+                    <Pressable
+                      hitSlop={8}
+                      onPress={() => void shift(item.id, -1)}
+                      style={[styles.miniBtn, index === 0 && { opacity: 0.4 }]}
+                      disabled={index === 0}
+                    >
+                      <Ionicons name="arrow-up" size={16} color={colors.text} />
+                    </Pressable>
+                    <Pressable
+                      hitSlop={8}
+                      onPress={() => void shift(item.id, 1)}
+                      style={[styles.miniBtn, index === grades.length - 1 && { opacity: 0.4 }]}
+                      disabled={index === grades.length - 1}
+                    >
+                      <Ionicons name="arrow-down" size={16} color={colors.text} />
+                    </Pressable>
                     <Pressable hitSlop={8} onPress={() => openEdit(item)} style={styles.miniBtn}>
                       <Ionicons name="create" size={16} color={colors.cyan} />
                     </Pressable>

@@ -1,17 +1,17 @@
 // ============================================================
-// استفسارات الطالب: إرسال سؤال/طلب + متابعة ردود الإدارة
+// استفسارات الطالب: إرسال سؤال/طلب نقل مجموعة + متابعة ردود الإدارة
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppButton, AppInput, Card, EmptyState, LoadingView, SectionTitle } from '../../src/components/controls';
 import { BackHeader, GradientScreen } from '../../src/components/layout';
 import { FormMessage, OptionPicker } from '../../src/components/pickers';
-import { addInquiry, fetchMyInquiries } from '../../src/lib/api';
+import { addInquiry, fetchGroups, fetchMyInquiries, fetchStudentById, fetchStudentGroups } from '../../src/lib/api';
 import { useSession } from '../../src/lib/session';
-import type { AppInquiry, InquiryKind } from '../../src/lib/types';
+import type { AppInquiry, Group, InquiryKind, Student } from '../../src/lib/types';
 import { arabicError, formatDate } from '../../src/lib/utils';
 import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
 
@@ -34,36 +34,101 @@ const STATUS_COLOR: Record<string, string> = {
 export default function MyInquiriesScreen() {
   const { profile } = useSession();
   const [items, setItems] = useState<AppInquiry[]>([]);
+  const [student, setStudent] = useState<Student | null>(null);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [membershipIds, setMembershipIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [formOpen, setFormOpen] = useState(false);
-  const [kind, setKind] = useState('question');
+  const [kind, setKind] = useState<InquiryKind>('question');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [fromGroupId, setFromGroupId] = useState<string | null>(null);
+  const [toGroupId, setToGroupId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    if (!profile?.student_id) { setLoading(false); return; }
-    try { setItems(await fetchMyInquiries(profile.student_id)); } catch { /* ignore */ } finally {
+    if (!profile?.student_id || !profile.center_id) { setLoading(false); return; }
+    try {
+      const [inq, st, gr, memberships] = await Promise.all([
+        fetchMyInquiries(profile.student_id),
+        fetchStudentById(profile.student_id),
+        fetchGroups(profile.center_id),
+        fetchStudentGroups(profile.student_id),
+      ]);
+      setItems(inq); setStudent(st); setGroups(gr);
+      setMembershipIds(memberships.map((m) => m.group_id));
+    } catch { /* ignore */ } finally {
       setLoading(false);
     }
-  }, [profile?.student_id]);
+  }, [profile?.student_id, profile?.center_id]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
+  const groupsMap = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
+  // المجموعات التي ينتمي إليها الطالب فعلياً (الأساسية + الإضافية)
+  const currentMembershipIds = useMemo(() => {
+    const ids = new Set(membershipIds);
+    if (student?.group_id) ids.add(student.group_id);
+    return Array.from(ids);
+  }, [membershipIds, student?.group_id]);
+  const sourceGroups = useMemo(
+    () => currentMembershipIds.map((id) => groupsMap.get(id)).filter((g): g is Group => !!g),
+    [currentMembershipIds, groupsMap],
+  );
+  // مجموعات صفه فقط، ولا تشمل ما هو منتمٍ إليه بالفعل
+  const eligibleTargetGroups = useMemo(
+    () => groups.filter((g) => g.grade_id === student?.grade_id && !currentMembershipIds.includes(g.id)),
+    [groups, student?.grade_id, currentMembershipIds],
+  );
+
+  const openNew = () => {
+    setFormError(null); setSubject(''); setBody('');
+    setKind('question'); setFromGroupId(null); setToGroupId(null);
+    setFormOpen(true);
+  };
+
+  const openTransfer = () => {
+    setFormError(null); setSubject(''); setBody('');
+    setKind('transfer');
+    setFromGroupId(student?.group_id || currentMembershipIds[0] || null);
+    setToGroupId(null);
+    setFormOpen(true);
+  };
+
+  const chooseKind = (value: string) => {
+    const nextKind = value as InquiryKind;
+    setKind(nextKind);
+    if (nextKind === 'transfer') {
+      setFromGroupId(student?.group_id || currentMembershipIds[0] || null);
+    } else {
+      setFromGroupId(null);
+    }
+    setToGroupId(null);
+  };
+
   const send = async () => {
     setFormError(null);
-    if (!subject.trim()) return setFormError('اكتب عنواناً لطلبك');
-    if (!body.trim()) return setFormError('اشرح طلبك بالتفصيل');
     if (!profile?.center_id || !profile.student_id) {
       return setFormError('تعذر تحديد حسابك — أعد فتح التطبيق وحاول مجدداً');
     }
+    if (kind === 'transfer') {
+      if (!fromGroupId || !toGroupId) return setFormError('اختر المجموعة الحالية والمجموعة المطلوبة');
+    } else {
+      if (!subject.trim()) return setFormError('اكتب عنواناً لطلبك');
+      if (!body.trim()) return setFormError('اشرح طلبك بالتفصيل');
+    }
     setBusy(true);
     try {
+      const source = fromGroupId ? groupsMap.get(fromGroupId) : null;
+      const target = toGroupId ? groupsMap.get(toGroupId) : null;
       await addInquiry({
-        centerId: profile.center_id, studentId: profile.student_id,
-        kind: kind as InquiryKind, subject, body,
+        centerId: profile.center_id, studentId: profile.student_id, kind,
+        subject: kind === 'transfer' ? `طلب انتقال: ${source?.name ?? 'مجموعة'} ← ${target?.name ?? 'مجموعة'}` : subject,
+        body: kind === 'transfer' ? (body || 'طلب انتقال المجموعة من بوابة الطالب.') : body,
+        fromGroupId: kind === 'transfer' ? fromGroupId : null,
+        toGroupId: kind === 'transfer' ? toGroupId : null,
       });
       setFormOpen(false); setSubject(''); setBody('');
       await load();
@@ -79,63 +144,132 @@ export default function MyInquiriesScreen() {
       <BackHeader
         title="استفساراتي"
         subtitle="راسل إدارة سنترك"
-        right={<AppButton title="جديد" icon="add" small onPress={() => { setFormError(null); setFormOpen(true); }} />}
+        right={<AppButton title="جديد" icon="add" small onPress={openNew} />}
       />
       {loading ? (
         <LoadingView message="جاري التحميل..." />
-      ) : items.length === 0 ? (
-        <EmptyState
-          icon="chatbubble-outline"
-          title="لا توجد مراسلات بعد"
-          message="عندك سؤال أو طلب نقل مجموعة؟ ابعته للإدارة من هنا"
-          action={<AppButton title="طلب جديد" icon="add" small onPress={() => setFormOpen(true)} />}
-        />
       ) : (
         <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
-          <SectionTitle title={`طلباتك (${items.length})`} />
-          {items.map((i) => (
-            <Card key={i.id} style={{ marginBottom: spacing.md }}>
-              <View style={styles.head}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.title} numberOfLines={1}>{i.subject}</Text>
-                  <Text style={styles.meta}>{KIND_LABEL[i.kind] ?? ''} · {formatDate(i.created_at)}</Text>
-                </View>
-                <View style={[styles.statusPill, { backgroundColor: (STATUS_COLOR[i.status] ?? colors.textMuted) + '22' }]}>
-                  <Text style={[styles.statusText, { color: STATUS_COLOR[i.status] ?? colors.textMuted }]}>
-                    {STATUS_LABEL[i.status] ?? i.status}
-                  </Text>
-                </View>
+          <Card style={{ marginBottom: spacing.md }}>
+            <View style={styles.transferHead}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.transferTitle}>طلب انتقال مجموعة</Text>
+                <Text style={styles.transferSub}>تظهر لك مجموعات صفك فقط. عند الموافقة تنتقل مجموعتك الأساسية تلقائياً.</Text>
               </View>
-              <Text style={styles.body}>{i.body}</Text>
-              {i.reply ? (
-                <View style={styles.replyBox}>
-                  <View style={styles.replyHead}>
-                    <Ionicons name="megaphone" size={14} color={colors.success} />
-                    <Text style={styles.replyLabel}>رد الإدارة</Text>
+              <Ionicons name="swap-horizontal" size={28} color={colors.info} />
+            </View>
+            <AppButton
+              title="طلب انتقال الآن"
+              icon="swap-horizontal"
+              small
+              variant="outline"
+              onPress={openTransfer}
+              disabled={sourceGroups.length === 0 || eligibleTargetGroups.length === 0}
+            />
+            {sourceGroups.length === 0 || eligibleTargetGroups.length === 0 ? (
+              <Text style={styles.transferHint}>لا توجد مجموعات أخرى متاحة للنقل داخل صفك حالياً.</Text>
+            ) : null}
+          </Card>
+
+          {items.length === 0 ? (
+            <EmptyState
+              icon="chatbubble-outline"
+              title="لا توجد مراسلات بعد"
+              message="عندك سؤال أو طلب نقل مجموعة؟ ابعته للإدارة من هنا"
+              action={<AppButton title="طلب جديد" icon="add" small onPress={openNew} />}
+            />
+          ) : (
+            <>
+              <SectionTitle title={`طلباتك (${items.length})`} />
+              {items.map((i) => (
+                <Card key={i.id} style={{ marginBottom: spacing.md }}>
+                  <View style={styles.head}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.title} numberOfLines={1}>
+                        {i.subject || (i.kind === 'transfer' ? 'طلب انتقال مجموعة' : 'طلب')}
+                      </Text>
+                      <Text style={styles.meta}>{KIND_LABEL[i.kind] ?? ''} · {formatDate(i.created_at)}</Text>
+                    </View>
+                    <View style={[styles.statusPill, { backgroundColor: (STATUS_COLOR[i.status] ?? colors.textMuted) + '22' }]}>
+                      <Text style={[styles.statusText, { color: STATUS_COLOR[i.status] ?? colors.textMuted }]}>
+                        {STATUS_LABEL[i.status] ?? i.status}
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={styles.replyText}>{i.reply}</Text>
-                </View>
-              ) : null}
-            </Card>
-          ))}
+                  {i.kind === 'transfer' ? (
+                    <Text style={styles.body}>
+                      من: {groupsMap.get(i.from_group_id ?? '')?.name ?? '—'} ← إلى: {groupsMap.get(i.to_group_id ?? '')?.name ?? '—'}
+                    </Text>
+                  ) : (
+                    <Text style={styles.body}>{i.body}</Text>
+                  )}
+                  {i.reply ? (
+                    <View style={styles.replyBox}>
+                      <View style={styles.replyHead}>
+                        <Ionicons name="megaphone" size={14} color={colors.success} />
+                        <Text style={styles.replyLabel}>رد الإدارة</Text>
+                      </View>
+                      <Text style={styles.replyText}>{i.reply}</Text>
+                    </View>
+                  ) : null}
+                </Card>
+              ))}
+            </>
+          )}
         </ScrollView>
       )}
 
       <Modal visible={formOpen} transparent animationType="slide" onRequestClose={() => setFormOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>طلب جديد للإدارة</Text>
-            <OptionPicker label="نوع الطلب" icon="chatbox" value={kind} options={KIND_OPTIONS} onChange={setKind} />
-            <AppInput label="العنوان" icon="text" placeholder="مثال: طلب نقل لمجموعة الثلاثاء" value={subject} onChangeText={setSubject} />
-            <AppInput
-              label="التفاصيل" icon="document-text" placeholder="اشرح طلبك..."
-              value={body} onChangeText={setBody} multiline numberOfLines={4}
-              style={{ minHeight: 100, textAlignVertical: 'top' }}
-            />
-            <FormMessage type="error" text={formError} />
-            <AppButton title="إرسال الطلب" icon="send" onPress={send} loading={busy} />
-            <View style={{ height: spacing.sm }} />
-            <AppButton title="إلغاء" variant="ghost" small onPress={() => setFormOpen(false)} />
+            <Text style={styles.modalTitle}>{kind === 'transfer' ? 'طلب انتقال إلى مجموعة' : 'طلب جديد للإدارة'}</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <OptionPicker label="نوع الطلب" icon="chatbox" value={kind} options={KIND_OPTIONS} onChange={chooseKind} />
+              {kind === 'transfer' ? (
+                <>
+                  <FormMessage type="info" text="لن تظهر أي مجموعة من صف آخر، ولا يمكن إرسال الطلب إلى مجموعة من مجموعاتك الحالية." />
+                  <OptionPicker
+                    label="المجموعة الحالية"
+                    icon="albums"
+                    value={fromGroupId}
+                    options={sourceGroups.map((g) => ({ value: g.id, label: g.name }))}
+                    onChange={setFromGroupId}
+                    placeholder="اختر المجموعة..."
+                  />
+                  <OptionPicker
+                    label="المجموعة المطلوبة"
+                    icon="swap-horizontal"
+                    value={toGroupId}
+                    options={eligibleTargetGroups.map((g) => ({
+                      value: g.id,
+                      label: g.name,
+                      subtitle: g.teacher_name ? `المدرس: ${g.teacher_name}` : undefined,
+                    }))}
+                    onChange={setToGroupId}
+                    placeholder="اختر من مجموعات صفك..."
+                  />
+                  <AppInput
+                    label="سبب أو ملاحظة (اختياري)" icon="document-text" placeholder="مثال: الوقت المناسب للمجموعة الأخرى"
+                    value={body} onChangeText={setBody} multiline numberOfLines={3}
+                    style={{ minHeight: 80, textAlignVertical: 'top' }}
+                  />
+                </>
+              ) : (
+                <>
+                  <AppInput label="العنوان" icon="text" placeholder="مثال: سؤال عن موعد الاختبار" value={subject} onChangeText={setSubject} />
+                  <AppInput
+                    label="التفاصيل" icon="document-text" placeholder="اشرح طلبك..."
+                    value={body} onChangeText={setBody} multiline numberOfLines={4}
+                    style={{ minHeight: 100, textAlignVertical: 'top' }}
+                  />
+                </>
+              )}
+              <FormMessage type="error" text={formError} />
+              <AppButton title="إرسال الطلب" icon="send" onPress={send} loading={busy} />
+              <View style={{ height: spacing.sm }} />
+              <AppButton title="إلغاء" variant="ghost" small onPress={() => setFormOpen(false)} />
+              <View style={{ height: spacing.xl }} />
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -144,6 +278,10 @@ export default function MyInquiriesScreen() {
 }
 
 const styles = themedStyles(() => StyleSheet.create({
+  transferHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.md },
+  transferTitle: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
+  transferSub: { color: colors.textSecondary, fontSize: font.xs, textAlign: 'right', marginTop: 4, lineHeight: 18 },
+  transferHint: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: spacing.sm },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   title: { color: colors.text, fontSize: font.md, fontWeight: '800', textAlign: 'right' },
   meta: { color: colors.textMuted, fontSize: font.xs, textAlign: 'right', marginTop: 2 },
@@ -161,7 +299,7 @@ const styles = themedStyles(() => StyleSheet.create({
   modalSheet: {
     backgroundColor: colors.bgSoft, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
     padding: spacing.xl, paddingBottom: spacing.xxl * 1.5,
-    borderWidth: 1, borderColor: colors.border,
+    borderWidth: 1, borderColor: colors.border, maxHeight: '92%',
   },
   modalTitle: {
     color: colors.text, fontSize: font.lg, fontWeight: '900',
